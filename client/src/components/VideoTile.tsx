@@ -44,7 +44,7 @@ export function VideoTile({
 
   return (
     <Card 
-      className="relative aspect-video overflow-hidden bg-black border-2 border-border" 
+      className="relative aspect-[16/9] overflow-hidden bg-black border-2 border-border w-full h-[400px] sm:h-[500px]" 
       data-testid={`video-tile-${name.toLowerCase().replace(/\s/g, '-')}`}
     >
       {/* Video Element or Avatar Fallback */}
