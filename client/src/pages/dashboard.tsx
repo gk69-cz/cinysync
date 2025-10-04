@@ -1,4 +1,4 @@
-import { Film, Home, Users, Compass, Settings, Plus } from "lucide-react";
+import { Film, Home, Users, Compass, Settings, LogOut } from "lucide-react";
 import { SidebarProvider, Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger } from "@/components/ui/sidebar";
 import { RoomCard } from "@/components/RoomCard";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -7,6 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { CreateRoomDialog } from "@/components/CreateRoomDialog";
+import { useAuth } from "@/contexts/AuthContext";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { useLocation } from "wouter";
 
 const menuItems = [
   { title: "Home", icon: Home, url: "/dashboard" },
@@ -17,6 +20,27 @@ const menuItems = [
 ];
 
 function AppSidebar() {
+  const { currentUser, logout } = useAuth();
+  const [, setLocation] = useLocation();
+
+  const handleLogout = async () => {
+    await logout();
+    setLocation("/login");
+  };
+
+  const getInitials = (name: string | null) => {
+    if (!name) return "U";
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  const displayName = currentUser?.displayName || "User";
+  const displayEmail = currentUser?.email || "";
+
   return (
     <Sidebar>
       <SidebarContent className="p-4">
@@ -46,16 +70,33 @@ function AppSidebar() {
         </SidebarGroup>
 
         <div className="mt-auto pt-6 border-t border-sidebar-border">
-          <div className="flex items-center gap-3 p-2 rounded-lg hover-elevate cursor-pointer">
-            <Avatar className="h-9 w-9">
-              <AvatarFallback>JD</AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">John Doe</p>
-              <p className="text-xs text-muted-foreground truncate">john@example.com</p>
-            </div>
-            <div className="h-2 w-2 rounded-full bg-status-online" />
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <div className="flex items-center gap-3 p-2 rounded-lg hover-elevate cursor-pointer">
+                <Avatar className="h-9 w-9">
+                  <AvatarImage src={currentUser?.photoURL || undefined} />
+                  <AvatarFallback>{getInitials(displayName)}</AvatarFallback>
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{displayName}</p>
+                  <p className="text-xs text-muted-foreground truncate">{displayEmail}</p>
+                </div>
+                <div className="h-2 w-2 rounded-full bg-status-online" />
+              </div>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>My Account</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setLocation("/settings")} data-testid="menu-settings">
+                <Settings className="mr-2 h-4 w-4" />
+                Settings
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleLogout} data-testid="menu-logout">
+                <LogOut className="mr-2 h-4 w-4" />
+                Log out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </SidebarContent>
     </Sidebar>
@@ -63,6 +104,9 @@ function AppSidebar() {
 }
 
 export default function Dashboard() {
+  const { currentUser } = useAuth();
+  const displayName = currentUser?.displayName?.split(" ")[0] || "there";
+
   const style = {
     "--sidebar-width": "18rem",
   };
@@ -81,7 +125,7 @@ export default function Dashboard() {
             <div className="max-w-7xl mx-auto space-y-8">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
-                  <h1 className="font-display font-bold text-4xl mb-2">Welcome back, John!</h1>
+                  <h1 className="font-display font-bold text-4xl mb-2">Welcome back, {displayName}!</h1>
                   <p className="text-muted-foreground">Ready to watch something together?</p>
                 </div>
                 <CreateRoomDialog />
