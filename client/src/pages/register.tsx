@@ -4,22 +4,56 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Film } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { SiGoogle } from "react-icons/si";
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Register() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const { signup, loginWithGoogle } = useAuth();
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('Register:', { name, email, password, confirmPassword });
+    
+    if (!name || !email || !password || !confirmPassword) return;
+
+    if (password !== confirmPassword) {
+      toast({
+        title: "Passwords don't match",
+        description: "Please make sure your passwords match",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await signup(email, password, name);
+      setLocation("/dashboard");
+    } catch (error) {
+      console.error("Registration error:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleGoogleRegister = () => {
-    console.log('Google register triggered');
+  const handleGoogleRegister = async () => {
+    setLoading(true);
+    try {
+      await loginWithGoogle();
+      setLocation("/dashboard");
+    } catch (error) {
+      console.error("Google registration error:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -88,8 +122,8 @@ export default function Register() {
             />
           </div>
 
-          <Button type="submit" className="w-full h-12 rounded-2xl" data-testid="button-register">
-            Create Account
+          <Button type="submit" className="w-full h-12 rounded-2xl" disabled={loading} data-testid="button-register">
+            {loading ? "Creating account..." : "Create Account"}
           </Button>
         </form>
 
@@ -106,10 +140,11 @@ export default function Register() {
           variant="outline" 
           className="w-full h-12 rounded-2xl" 
           onClick={handleGoogleRegister}
+          disabled={loading}
           data-testid="button-google-register"
         >
           <SiGoogle className="mr-2 h-5 w-5" />
-          Sign up with Google
+          {loading ? "Signing up..." : "Sign up with Google"}
         </Button>
 
         <p className="text-center mt-6 text-sm text-muted-foreground">

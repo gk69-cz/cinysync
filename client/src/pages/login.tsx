@@ -4,20 +4,42 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Film } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { SiGoogle } from "react-icons/si";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const { login, loginWithGoogle } = useAuth();
+  const [, setLocation] = useLocation();
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('Login:', { email, password });
+    if (!email || !password) return;
+
+    setLoading(true);
+    try {
+      await login(email, password);
+      setLocation("/dashboard");
+    } catch (error) {
+      console.error("Login error:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleGoogleLogin = () => {
-    console.log('Google login triggered');
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    try {
+      await loginWithGoogle();
+      setLocation("/dashboard");
+    } catch (error) {
+      console.error("Google login error:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -69,8 +91,8 @@ export default function Login() {
             </Link>
           </div>
 
-          <Button type="submit" className="w-full h-12 rounded-2xl" data-testid="button-login">
-            Sign In
+          <Button type="submit" className="w-full h-12 rounded-2xl" disabled={loading} data-testid="button-login">
+            {loading ? "Signing in..." : "Sign In"}
           </Button>
         </form>
 
@@ -87,10 +109,11 @@ export default function Login() {
           variant="outline" 
           className="w-full h-12 rounded-2xl" 
           onClick={handleGoogleLogin}
+          disabled={loading}
           data-testid="button-google-login"
         >
           <SiGoogle className="mr-2 h-5 w-5" />
-          Sign in with Google
+          {loading ? "Signing in..." : "Sign in with Google"}
         </Button>
 
         <p className="text-center mt-6 text-sm text-muted-foreground">
