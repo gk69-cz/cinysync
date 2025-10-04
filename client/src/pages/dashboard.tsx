@@ -24,8 +24,12 @@ function AppSidebar() {
   const [, setLocation] = useLocation();
 
   const handleLogout = async () => {
-    await logout();
-    setLocation("/login");
+    try {
+      await logout();
+      setLocation("/login");
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
   };
 
   const getInitials = (name: string | null) => {
