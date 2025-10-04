@@ -4,11 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { VideoTile } from "@/components/VideoTile";
 import { ChatContainer } from "@/components/ChatContainer";
-import { VideoPlayer } from "../components/VideoPlayer";
-import { Film, Mic, MicOff, Video, VideoOff, Share2, Settings as SettingsIcon, LogOut, Copy } from "lucide-react";
+import { VideoPlayer } from "@/components/VideoPlayer";
+import { Film, Mic, MicOff, Video, VideoOff, Share2, Settings as SettingsIcon, LogOut, Copy, Phone, PhoneOff } from "lucide-react";
 import { Link, useParams, useLocation } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
+import { useWebRTC } from "@/hooks/useWebRTC";
 
 import { getRoomById, joinRoom, leaveRoom } from "../services/roomService";
 import { Room } from "@/types/room";
@@ -20,10 +21,26 @@ export default function RoomPage() {
   const { currentUser } = useAuth();
   const { toast } = useToast();
 
-  const [isMuted, setIsMuted] = useState(false);
-  const [isVideoOff, setIsVideoOff] = useState(false);
   const [room, setRoom] = useState<Room | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // WebRTC hook for video/audio
+  const {
+    localStream,
+    remotePeers,
+    isAudioEnabled,
+    isVideoEnabled,
+    isConnected,
+    isInitializing,
+    toggleAudio,
+    toggleVideo,
+    connect,
+    disconnect,
+  } = useWebRTC({
+    roomId: id!,
+    userId: currentUser?.uid || "",
+    autoStart: false, // Don't auto-start, user clicks button to join
+  });
 
   useEffect(() => {
     loadRoom();
@@ -80,6 +97,11 @@ export default function RoomPage() {
     if (!id || !currentUser) return;
 
     try {
+      // Disconnect WebRTC first
+      if (isConnected) {
+        await disconnect();
+      }
+      
       await leaveRoom(id, currentUser.uid);
       toast({
         title: "Left room",
@@ -187,23 +209,62 @@ export default function RoomPage() {
           {/* Video Controls */}
           <div className="p-4 border-t border-border bg-card/50 backdrop-blur-sm">
             <div className="flex items-center justify-center gap-3">
+              {/* Join/Leave Call Button */}
+              {!isConnected ? (
+                <Button
+                  variant="default"
+                  size="icon"
+                  onClick={connect}
+                  disabled={isInitializing}
+                  data-testid="button-join-call"
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  {isInitializing ? (
+                    <div className="h-5 w-5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                  ) : (
+                    <Phone className="h-5 w-5" />
+                  )}
+                </Button>
+              ) : (
+                <Button
+                  variant="destructive"
+                  size="icon"
+                  onClick={disconnect}
+                  data-testid="button-leave-call"
+                >
+                  <PhoneOff className="h-5 w-5" />
+                </Button>
+              )}
+
+              {/* Mic Toggle */}
               <Button
-                variant={isMuted ? "destructive" : "secondary"}
+                variant={!isAudioEnabled ? "destructive" : "secondary"}
                 size="icon"
-                onClick={() => setIsMuted(!isMuted)}
+                onClick={toggleAudio}
+                disabled={!isConnected}
                 data-testid="button-toggle-mic"
               >
-                {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+                {!isAudioEnabled ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
               </Button>
+
+              {/* Video Toggle */}
               <Button
-                variant={isVideoOff ? "destructive" : "secondary"}
+                variant={!isVideoEnabled ? "destructive" : "secondary"}
                 size="icon"
-                onClick={() => setIsVideoOff(!isVideoOff)}
+                onClick={toggleVideo}
+                disabled={!isConnected}
                 data-testid="button-toggle-video"
               >
-                {isVideoOff ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
+                {!isVideoEnabled ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
               </Button>
-              <Button variant="secondary" size="icon" data-testid="button-share-screen">
+
+              {/* Screen Share (Future feature) */}
+              <Button 
+                variant="secondary" 
+                size="icon" 
+                disabled={!isConnected}
+                data-testid="button-share-screen"
+              >
                 <Share2 className="h-5 w-5" />
               </Button>
             </div>
@@ -214,13 +275,42 @@ export default function RoomPage() {
         <div className="w-80 border-l border-border flex flex-col">
           {/* Participants Section */}
           <div className="p-4 border-b border-border">
-            <h2 className="font-semibold mb-3">Participants ({room.participants.length})</h2>
-            <div className="grid grid-cols-2 gap-2">
-              <VideoTile 
-                name={currentUser?.displayName || "You"} 
-                isMuted={isMuted} 
-              />
-              {/* TODO: Load real participants from Firebase */}
+            <h2 className="font-semibold mb-3">
+              Participants ({room.participants.length})
+              {isConnected && <span className="text-green-500 ml-2">● Live</span>}
+            </h2>
+            <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
+              {/* Local user video */}
+              {isConnected && (
+                <VideoTile 
+                  name={currentUser?.displayName || "You"} 
+                  avatar={currentUser?.photoURL || undefined}
+                  isMuted={!isAudioEnabled} 
+                  stream={localStream || undefined}
+                  isLocal={true}
+                />
+              )}
+              
+              {/* Remote participants */}
+              {remotePeers.map((peer) => (
+                <VideoTile
+                  key={peer.peerId}
+                  name={`User ${peer.peerId.slice(0, 6)}`}
+                  isMuted={false}
+                  stream={peer.stream}
+                  isLocal={false}
+                />
+              ))}
+              
+              {/* Placeholder when not connected */}
+              {!isConnected && (
+                <div className="col-span-2 text-center p-4 bg-muted rounded-lg">
+                  <Phone className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    Click the green phone button to join the video call
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 

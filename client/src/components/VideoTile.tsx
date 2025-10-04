@@ -8,7 +8,10 @@ interface VideoTileProps {
   avatar?: string;
   isMuted?: boolean;
   isScreenSharing?: boolean;
+  isLocal: boolean;
+  stream?: MediaStream;
 }
+
 
 export function VideoTile({ name, avatar, isMuted = false, isScreenSharing = false }: VideoTileProps) {
   const initials = name.split(' ').map(n => n[0]).join('').toUpperCase();
