@@ -1,3 +1,5 @@
+// client/src/pages/dashboard.tsx
+import { useState, useEffect } from "react";
 import { Film, Home, Users, Compass, Settings, LogOut } from "lucide-react";
 import { SidebarProvider, Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger } from "@/components/ui/sidebar";
 import { RoomCard } from "@/components/RoomCard";
@@ -10,6 +12,9 @@ import { CreateRoomDialog } from "@/components/CreateRoomDialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useLocation } from "wouter";
+import { getActiveRooms, getUserRooms, getRoomByCode } from "../services/roomService";
+import { Room } from "@/types/room";
+import { useToast } from "@/hooks/use-toast";
 
 const menuItems = [
   { title: "Home", icon: Home, url: "/dashboard" },
@@ -109,7 +114,94 @@ function AppSidebar() {
 
 export default function Dashboard() {
   const { currentUser } = useAuth();
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+  const [joinCode, setJoinCode] = useState("");
+  const [isJoining, setIsJoining] = useState(false);
+  const [activeRooms, setActiveRooms] = useState<Room[]>([]);
+  const [userRooms, setUserRooms] = useState<Room[]>([]);
+  const [loading, setLoading] = useState(true);
+
   const displayName = currentUser?.displayName?.split(" ")[0] || "there";
+
+  useEffect(() => {
+    loadRooms();
+  }, [currentUser]);
+
+  const loadRooms = async () => {
+    if (!currentUser) return;
+
+    try {
+      setLoading(true);
+      const [active, user] = await Promise.all([
+        getActiveRooms(),
+        getUserRooms(currentUser.uid),
+      ]);
+      
+      // Filter to show only public rooms or rooms user is part of
+      const filteredActive = active.filter(
+        room => !room.isPrivate || room.participants.includes(currentUser.uid)
+      ).slice(0, 6);
+      
+      setActiveRooms(filteredActive);
+      setUserRooms(user.slice(0, 6));
+    } catch (error) {
+      console.error("Error loading rooms:", error);
+      toast({
+        title: "Failed to load rooms",
+        description: "Please refresh the page",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleJoinByCode = async () => {
+    if (!joinCode.trim()) {
+      toast({
+        title: "Enter a room code",
+        description: "Please enter a valid room code",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsJoining(true);
+
+    try {
+      const room = await getRoomByCode(joinCode.trim().toUpperCase());
+
+      if (!room) {
+        toast({
+          title: "Room not found",
+          description: "Please check the code and try again",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (room.isPrivate && !room.participants.includes(currentUser!.uid)) {
+        toast({
+          title: "Private room",
+          description: "You need an invitation to join this room",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setLocation(`/room/${room.id}`);
+    } catch (error) {
+      console.error("Error joining room:", error);
+      toast({
+        title: "Failed to join room",
+        description: "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setIsJoining(false);
+    }
+  };
 
   const style = {
     "--sidebar-width": "18rem",
@@ -139,58 +231,76 @@ export default function Dashboard() {
                 <Input 
                   placeholder="Join with room code..." 
                   className="h-12 rounded-xl flex-1"
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                  onKeyPress={(e) => e.key === 'Enter' && handleJoinByCode()}
+                  disabled={isJoining}
                   data-testid="input-join-code"
                 />
-                <Button className="h-12 rounded-xl px-8" data-testid="button-join">Join</Button>
+                <Button 
+                  className="h-12 rounded-xl px-8" 
+                  onClick={handleJoinByCode}
+                  disabled={isJoining}
+                  data-testid="button-join"
+                >
+                  {isJoining ? "Joining..." : "Join"}
+                </Button>
               </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="font-display font-semibold text-2xl">Active Rooms</h2>
-                  <Badge variant="secondary" className="rounded-full">
-                    <div className="h-2 w-2 rounded-full bg-status-online mr-2" />
-                    5 live
-                  </Badge>
+              {loading ? (
+                <div className="text-center py-12">
+                  <div className="h-8 w-8 rounded-full border-4 border-primary border-t-transparent animate-spin mx-auto mb-4" />
+                  <p className="text-muted-foreground">Loading rooms...</p>
                 </div>
-                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                  <RoomCard
-                    roomName="Friday Night Movie"
-                    service="Netflix"
-                    participants={5}
-                    isPrivate={false}
-                  />
-                  <RoomCard
-                    roomName="Action Marathon"
-                    service="Prime Video"
-                    participants={3}
-                    isPrivate={true}
-                  />
-                  <RoomCard
-                    roomName="Disney Classics"
-                    service="Disney+"
-                    participants={8}
-                    isPrivate={false}
-                  />
-                </div>
-              </div>
+              ) : (
+                <>
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <h2 className="font-display font-semibold text-2xl">Active Rooms</h2>
+                      <Badge variant="secondary" className="rounded-full">
+                        <div className="h-2 w-2 rounded-full bg-status-online mr-2" />
+                        {activeRooms.length} live
+                      </Badge>
+                    </div>
+                    {activeRooms.length > 0 ? (
+                      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {activeRooms.map((room) => (
+                          <RoomCard
+                            key={room.id}
+                            roomName={room.roomName}
+                            service={room.service}
+                            participants={room.participants.length}
+                            isPrivate={room.isPrivate}
+                            roomId={room.id}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-center text-muted-foreground py-8">No active rooms right now</p>
+                    )}
+                  </div>
 
-              <div>
-                <h2 className="font-display font-semibold text-2xl mb-4">My Recent Rooms</h2>
-                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                  <RoomCard
-                    roomName="Last Week's Thriller"
-                    service="Netflix"
-                    participants={0}
-                    isPrivate={true}
-                  />
-                  <RoomCard
-                    roomName="Weekend Comedy"
-                    service="Prime Video"
-                    participants={0}
-                    isPrivate={false}
-                  />
-                </div>
-              </div>
+                  <div>
+                    <h2 className="font-display font-semibold text-2xl mb-4">My Recent Rooms</h2>
+                    {userRooms.length > 0 ? (
+                      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {userRooms.map((room) => (
+                          <RoomCard
+                            key={room.id}
+                            roomName={room.roomName}
+                            service={room.service}
+                            participants={room.participants.length}
+                            isPrivate={room.isPrivate}
+                            roomId={room.id}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-center text-muted-foreground py-8">You haven't created any rooms yet</p>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </main>
         </div>

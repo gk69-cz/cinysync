@@ -1,45 +1,70 @@
-import { Card } from "@/components/ui/card";
+// client/src/components/RoomCard.tsx
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Users, Lock } from "lucide-react";
+import { useLocation } from "wouter";
 
 interface RoomCardProps {
   roomName: string;
-  service: "Netflix" | "Prime Video" | "Disney+";
+  service: string;
   participants: number;
   isPrivate: boolean;
-  thumbnail?: string;
+  roomId?: string;
 }
 
-export function RoomCard({ roomName, service, participants, isPrivate, thumbnail }: RoomCardProps) {
-  const serviceColors = {
-    "Netflix": "bg-red-500/10 text-red-500",
-    "Prime Video": "bg-blue-500/10 text-blue-500",
-    "Disney+": "bg-indigo-500/10 text-indigo-500"
+export function RoomCard({ roomName, service, participants, isPrivate, roomId }: RoomCardProps) {
+  const [, setLocation] = useLocation();
+
+  const getServiceColor = (service: string) => {
+    switch (service.toLowerCase()) {
+      case "netflix":
+        return "bg-red-500/10 text-red-500 border-red-500/20";
+      case "prime":
+      case "prime video":
+        return "bg-blue-500/10 text-blue-500 border-blue-500/20";
+      case "disney":
+      case "disney+":
+        return "bg-purple-500/10 text-purple-500 border-purple-500/20";
+      default:
+        return "bg-primary/10 text-primary border-primary/20";
+    }
+  };
+
+  const handleJoin = () => {
+    if (roomId) {
+      setLocation(`/room/${roomId}`);
+    }
   };
 
   return (
-    <Card className="overflow-hidden hover-elevate active-elevate-2 cursor-pointer transition-all" data-testid={`card-room-${roomName.toLowerCase().replace(/\s/g, '-')}`}>
-      <div className="aspect-video bg-muted relative">
-        {thumbnail && (
-          <img src={thumbnail} alt={roomName} className="w-full h-full object-cover" />
-        )}
-        <div className="absolute top-3 right-3 flex gap-2">
-          <Badge className={serviceColors[service]}>{service}</Badge>
+    <Card className="hover-elevate cursor-pointer group" onClick={handleJoin}>
+      <CardHeader>
+        <div className="flex items-start justify-between">
+          <CardTitle className="text-xl">{roomName}</CardTitle>
           {isPrivate && (
-            <Badge variant="secondary">
-              <Lock className="h-3 w-3 mr-1" />
-              Private
-            </Badge>
+            <Lock className="h-4 w-4 text-muted-foreground" />
           )}
         </div>
-      </div>
-      <div className="p-4">
-        <h3 className="font-semibold text-lg mb-2">{roomName}</h3>
-        <div className="flex items-center text-sm text-muted-foreground">
-          <Users className="h-4 w-4 mr-1" />
-          <span data-testid={`text-participants-${roomName.toLowerCase().replace(/\s/g, '-')}`}>{participants} watching</span>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center justify-between">
+          <Badge className={getServiceColor(service)} variant="outline">
+            {service}
+          </Badge>
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <Users className="h-4 w-4" />
+            <span>{participants}</span>
+          </div>
         </div>
-      </div>
+        <Button 
+          className="w-full rounded-xl group-hover:bg-primary group-hover:text-primary-foreground transition-colors"
+          variant="outline"
+          onClick={handleJoin}
+        >
+          Join Room
+        </Button>
+      </CardContent>
     </Card>
   );
 }
