@@ -9,7 +9,7 @@ import { Film, Mic, MicOff, Video, VideoOff, Share2, Settings as SettingsIcon, L
 import { Link, useParams, useLocation } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
-import { useWebRTC } from "@/hooks/useWebRTC";
+import { useWebRTC as WebRTCService } from "@/hooks/useWebRTC";
 
 import { getRoomById, joinRoom, leaveRoom } from "../services/roomService";
 import { Room } from "@/types/room";
@@ -24,23 +24,70 @@ export default function RoomPage() {
   const [room, setRoom] = useState<Room | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // WebRTC hook for video/audio
-  const {
-    localStream,
-    remotePeers,
-    isAudioEnabled,
-    isVideoEnabled,
-    isConnected,
-    isInitializing,
-    toggleAudio,
-    toggleVideo,
-    connect,
-    disconnect,
-  } = useWebRTC({
-    roomId: id!,
-    userId: currentUser?.uid || "",
-    autoStart: false, // Don't auto-start, user clicks button to join
-  });
+
+// inside your component
+const [webrtc, setWebRTC] = useState<WebRTCService | null>(null);
+const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+const [remotePeers, setRemotePeers] = useState<any[]>([]);
+const [isConnected, setIsConnected] = useState(false);
+const [isInitializing, setIsInitializing] = useState(false);
+const [isAudioEnabled, setIsAudioEnabled] = useState(true);
+const [isVideoEnabled, setIsVideoEnabled] = useState(true);
+
+// Initialize WebRTC when user joins
+const connect = async () => {
+  if (webrtc) return; // prevent duplicates
+  setIsInitializing(true);
+  try {
+    const service = new WebRTCService(
+      id!,
+      currentUser?.uid || "",
+      (peerId: string, stream: MediaStream) => {
+        setRemotePeers((prev) => [...prev, { peerId, stream }]);
+      },
+      (peerId: string) => {
+        setRemotePeers((prev) => prev.filter((p) => p.peerId !== peerId));
+      }
+    );
+
+    const stream = await service.initializeLocalStream(isAudioEnabled, isVideoEnabled);
+    setLocalStream(stream);
+
+    await service.joinRoom();
+    setWebRTC(service);
+    setIsConnected(true);
+  } catch (err) {
+    console.error("Error connecting WebRTC:", err);
+  } finally {
+    setIsInitializing(false);
+  }
+};
+
+// Leave call and cleanup
+const disconnect = async () => {
+  if (!webrtc) return;
+  await webrtc.leaveRoom();
+  setWebRTC(null);
+  setLocalStream(null);
+  setRemotePeers([]);
+  setIsConnected(false);
+};
+
+// Toggle audio/video
+const toggleAudio = () => {
+  if (!webrtc) return;
+  const newState = !isAudioEnabled;
+  webrtc.toggleAudio(newState);
+  setIsAudioEnabled(newState);
+};
+
+const toggleVideo = () => {
+  if (!webrtc) return;
+  const newState = !isVideoEnabled;
+  webrtc.toggleVideo(newState);
+  setIsVideoEnabled(newState);
+};
+
 
   useEffect(() => {
     loadRoom();

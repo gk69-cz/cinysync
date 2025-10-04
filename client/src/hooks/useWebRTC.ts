@@ -1,157 +1,183 @@
-// client/src/hooks/useWebRTC.ts
-import { useState, useEffect, useRef, useCallback } from "react";
-import { WebRTCService } from "@/services/webrtcService";
-import { useToast } from "@/hooks/use-toast";
+// client/src/services/webrtcService.ts
+import { doc, onSnapshot, setDoc, updateDoc, deleteDoc, collection, addDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase"; // adjust this import to your Firebase config
 
-interface RemotePeer {
-  peerId: string;
-  stream: MediaStream;
-}
+const ICE_CONFIG: RTCConfiguration = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+  ],
+};
 
-interface UseWebRTCOptions {
-  roomId: string;
-  userId: string;
-  autoStart?: boolean;
-}
+type OnRemoteStreamCallback = (peerId: string, stream: MediaStream) => void;
+type OnPeerDisconnectedCallback = (peerId: string) => void;
 
-export function useWebRTC({ roomId, userId, autoStart = false }: UseWebRTCOptions) {
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [remotePeers, setRemotePeers] = useState<Map<string, MediaStream>>(new Map());
-  const [isAudioEnabled, setIsAudioEnabled] = useState(true);
-  const [isVideoEnabled, setIsVideoEnabled] = useState(true);
-  const [isConnected, setIsConnected] = useState(false);
-  const [isInitializing, setIsInitializing] = useState(false);
-  
-  const webrtcServiceRef = useRef<WebRTCService | null>(null);
-  const { toast } = useToast();
+export class  useWebRTC {
+  private roomId: string;
+  private userId: string;
+  private localStream: MediaStream | null = null;
+  private peers: Map<string, RTCPeerConnection> = new Map();
+  private onRemoteStream: OnRemoteStreamCallback;
+  private onPeerDisconnected: OnPeerDisconnectedCallback;
+  private unsubscribers: (() => void)[] = [];
 
-  // Initialize WebRTC service
-  const initializeWebRTC = useCallback(async () => {
-    if (webrtcServiceRef.current || isInitializing) return;
+  constructor(
+    roomId: string,
+    userId: string,
+    onRemoteStream: OnRemoteStreamCallback,
+    onPeerDisconnected: OnPeerDisconnectedCallback
+  ) {
+    this.roomId = roomId;
+    this.userId = userId;
+    this.onRemoteStream = onRemoteStream;
+    this.onPeerDisconnected = onPeerDisconnected;
+  }
 
-    setIsInitializing(true);
-    try {
-      // Create WebRTC service
-      const service = new WebRTCService(
-        roomId,
-        userId,
-        (peerId, stream) => {
-          // Handle remote stream
-          setRemotePeers((prev) => {
-            const newPeers = new Map(prev);
-            newPeers.set(peerId, stream);
-            return newPeers;
-          });
-        },
-        (peerId) => {
-          // Handle peer disconnection
-          setRemotePeers((prev) => {
-            const newPeers = new Map(prev);
-            newPeers.delete(peerId);
-            return newPeers;
-          });
+  // 🔹 Initialize local media
+  async initializeLocalStream(enableAudio = true, enableVideo = true) {
+    this.localStream = await navigator.mediaDevices.getUserMedia({
+      audio: enableAudio,
+      video: enableVideo,
+    });
+    return this.localStream;
+  }
+
+  // 🔹 Join Firestore-based signaling room
+  async joinRoom() {
+    const roomRef = doc(db, "rooms", this.roomId);
+    const candidatesRef = collection(roomRef, "candidates");
+
+    // Watch for other users’ offers/answers
+    const unsub = onSnapshot(roomRef, async (snapshot) => {
+      const data = snapshot.data();
+      if (!data) return;
+
+      if (data.offer && data.offer.userId !== this.userId && !this.peers.has(data.offer.userId)) {
+        await this.handleOffer(data.offer, data.offer.userId, candidatesRef);
+      }
+
+      // Someone else’s answer
+      if (data.answer && data.answer.userId !== this.userId) {
+        const pc = this.peers.get(data.answer.userId);
+        if (pc && !pc.currentRemoteDescription) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
         }
-      );
+      }
+    });
 
-      webrtcServiceRef.current = service;
+    this.unsubscribers.push(unsub);
 
-      // Get local stream
-      const stream = await service.initializeLocalStream(isAudioEnabled, isVideoEnabled);
-      setLocalStream(stream);
+    // Create and send offer
+    await this.createOffer(candidatesRef);
+  }
 
-      // Join room
-      await service.joinRoom();
-      setIsConnected(true);
+  // 🔹 Create peer connection & offer
+  private async createOffer(candidatesRef: any) {
+    const pc = this.createPeerConnection(this.userId);
 
-      toast({
-        title: "Connected",
-        description: "Video and audio enabled",
-      });
-    } catch (error: any) {
-      console.error("Error initializing WebRTC:", error);
-      toast({
-        title: "Connection failed",
-        description: error.message || "Failed to access camera/microphone",
-        variant: "destructive",
-      });
-    } finally {
-      setIsInitializing(false);
-    }
-  }, [roomId, userId, isAudioEnabled, isVideoEnabled, toast, isInitializing]);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
 
-  // Auto-start if enabled
-  useEffect(() => {
-    if (autoStart && !isConnected && !isInitializing) {
-      initializeWebRTC();
-    }
-  }, [autoStart, isConnected, isInitializing, initializeWebRTC]);
+    await setDoc(doc(db, "rooms", this.roomId), {
+      offer: {
+        sdp: offer.sdp,
+        type: offer.type,
+        userId: this.userId,
+      },
+    });
+  }
 
-  // Toggle audio
-  const toggleAudio = useCallback(() => {
-    if (webrtcServiceRef.current) {
-      const newState = !isAudioEnabled;
-      webrtcServiceRef.current.toggleAudio(newState);
-      setIsAudioEnabled(newState);
-      
-      toast({
-        title: newState ? "Microphone on" : "Microphone off",
-        description: newState ? "You are now audible" : "You are now muted",
-      });
-    }
-  }, [isAudioEnabled, toast]);
+  // 🔹 Handle received offer
+  private async handleOffer(offer: any, peerId: string, candidatesRef: any) {
+    const pc = this.createPeerConnection(peerId);
 
-  // Toggle video
-  const toggleVideo = useCallback(() => {
-    if (webrtcServiceRef.current) {
-      const newState = !isVideoEnabled;
-      webrtcServiceRef.current.toggleVideo(newState);
-      setIsVideoEnabled(newState);
-      
-      toast({
-        title: newState ? "Camera on" : "Camera off",
-        description: newState ? "Your video is visible" : "Your video is hidden",
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    await updateDoc(doc(db, "rooms", this.roomId), {
+      answer: {
+        sdp: answer.sdp,
+        type: answer.type,
+        userId: this.userId,
+      },
+    });
+  }
+
+  // 🔹 Create peer connection
+  private createPeerConnection(peerId: string): RTCPeerConnection {
+    const pc = new RTCPeerConnection(ICE_CONFIG);
+
+    // Send local tracks
+    if (this.localStream) {
+      this.localStream.getTracks().forEach((track) => {
+        pc.addTrack(track, this.localStream!);
       });
     }
-  }, [isVideoEnabled, toast]);
 
-  // Disconnect
-  const disconnect = useCallback(async () => {
-    if (webrtcServiceRef.current) {
-      await webrtcServiceRef.current.leaveRoom();
-      webrtcServiceRef.current = null;
-      setLocalStream(null);
-      setRemotePeers(new Map());
-      setIsConnected(false);
-      
-      toast({
-        title: "Disconnected",
-        description: "Video call ended",
-      });
-    }
-  }, [toast]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (webrtcServiceRef.current) {
-        webrtcServiceRef.current.leaveRoom();
+    // Handle remote track
+    pc.ontrack = (event) => {
+      const [remoteStream] = event.streams;
+      if (remoteStream) {
+        this.onRemoteStream(peerId, remoteStream);
       }
     };
-  }, []);
 
-  return {
-    localStream,
-    remotePeers: Array.from(remotePeers.entries()).map(([peerId, stream]) => ({
-      peerId,
-      stream,
-    })),
-    isAudioEnabled,
-    isVideoEnabled,
-    isConnected,
-    isInitializing,
-    toggleAudio,
-    toggleVideo,
-    connect: initializeWebRTC,
-    disconnect,
-  };
+    // Handle ICE candidates
+    pc.onicecandidate = async (event) => {
+      if (event.candidate) {
+        const roomRef = doc(db, "rooms", this.roomId);
+        const candidateDoc = collection(roomRef, "candidates");
+        await addDoc(candidateDoc, {
+          candidate: event.candidate.toJSON(),
+          userId: this.userId,
+        });
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (
+        pc.connectionState === "disconnected" ||
+        pc.connectionState === "failed" ||
+        pc.connectionState === "closed"
+      ) {
+        this.onPeerDisconnected(peerId);
+        this.peers.delete(peerId);
+      }
+    };
+
+    this.peers.set(peerId, pc);
+    return pc;
+  }
+
+  // 🔹 Toggle audio
+  toggleAudio(enabled: boolean) {
+    if (this.localStream) {
+      this.localStream.getAudioTracks().forEach((t) => (t.enabled = enabled));
+    }
+  }
+
+  // 🔹 Toggle video
+  toggleVideo(enabled: boolean) {
+    if (this.localStream) {
+      this.localStream.getVideoTracks().forEach((t) => (t.enabled = enabled));
+    }
+  }
+
+  // 🔹 Leave room & cleanup
+  async leaveRoom() {
+    this.unsubscribers.forEach((unsub) => unsub());
+    this.unsubscribers = [];
+
+    this.peers.forEach((pc) => pc.close());
+    this.peers.clear();
+
+    if (this.localStream) {
+      this.localStream.getTracks().forEach((track) => track.stop());
+      this.localStream = null;
+    }
+
+    await deleteDoc(doc(db, "rooms", this.roomId));
+  }
 }
