@@ -1,11 +1,11 @@
 // client/src/pages/room.tsx
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { VideoTile } from "@/components/VideoTile";
-import { ChatMessage } from "@/components/ChatMessage";
-import { Film, Mic, MicOff, Video, VideoOff, Share2, Settings as SettingsIcon, LogOut, Send, Smile, Copy } from "lucide-react";
+import { ChatContainer } from "@/components/ChatContainer";
+import { VideoPlayer } from "../components/VideoPlayer";
+import { Film, Mic, MicOff, Video, VideoOff, Share2, Settings as SettingsIcon, LogOut, Copy } from "lucide-react";
 import { Link, useParams, useLocation } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,7 +13,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getRoomById, joinRoom, leaveRoom } from "../services/roomService";
 import { Room } from "@/types/room";
 import { useToast } from "@/hooks/use-toast";
-import { VideoPlayer } from "@/components/ui/VideoPlayer";
 
 export default function RoomPage() {
   const { id } = useParams();
@@ -23,7 +22,6 @@ export default function RoomPage() {
 
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
-  const [message, setMessage] = useState("");
   const [room, setRoom] = useState<Room | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -96,13 +94,6 @@ export default function RoomPage() {
         variant: "destructive",
       });
     }
-  };
-
-  const handleSendMessage = () => {
-    if (!message.trim()) return;
-    console.log('Send message:', message);
-    // TODO: Implement real-time chat with Firebase
-    setMessage("");
   };
 
   const handleCopyRoomCode = async () => {
@@ -186,16 +177,14 @@ export default function RoomPage() {
 
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 flex flex-col">
+          {/* Video Player Area */}
           <div className="flex-1 bg-muted/30 flex items-center justify-center p-6">
-            <Card className="aspect-video w-full max-w-4xl bg-black/50 flex items-center justify-center">
-              <div className="flex-1 bg-muted/30 flex items-center justify-center p-6">
-  <div className="aspect-video w-full max-w-4xl">
-    <VideoPlayer url={room.url} service={room.service} />
-  </div>
-</div>
-            </Card>
+            <div className="aspect-video w-full max-w-4xl">
+              <VideoPlayer url={room.url} service={room.service} />
+            </div>
           </div>
 
+          {/* Video Controls */}
           <div className="p-4 border-t border-border bg-card/50 backdrop-blur-sm">
             <div className="flex items-center justify-center gap-3">
               <Button
@@ -221,7 +210,9 @@ export default function RoomPage() {
           </div>
         </div>
 
+        {/* Sidebar */}
         <div className="w-80 border-l border-border flex flex-col">
+          {/* Participants Section */}
           <div className="p-4 border-b border-border">
             <h2 className="font-semibold mb-3">Participants ({room.participants.length})</h2>
             <div className="grid grid-cols-2 gap-2">
@@ -233,44 +224,13 @@ export default function RoomPage() {
             </div>
           </div>
 
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="p-4 border-b border-border">
-              <h2 className="font-semibold">Chat</h2>
-            </div>
-
-            <div className="flex-1 overflow-auto p-4">
-              <ChatMessage
-                name={currentUser?.displayName || "You"}
-                message="Welcome to the watch party!"
-                timestamp={new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                isCurrentUser={true}
-              />
-            </div>
-
-            <div className="p-4 border-t border-border">
-              <div className="flex gap-2">
-                <Button variant="ghost" size="icon" className="shrink-0" data-testid="button-emoji">
-                  <Smile className="h-5 w-5" />
-                </Button>
-                <Input
-                  placeholder="Type a message..."
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                  className="h-10 rounded-full"
-                  data-testid="input-chat-message"
-                />
-                <Button 
-                  size="icon" 
-                  onClick={handleSendMessage} 
-                  className="shrink-0" 
-                  data-testid="button-send-message"
-                >
-                  <Send className="h-5 w-5" />
-                </Button>
-              </div>
-            </div>
-          </div>
+          {/* Chat Section */}
+          <ChatContainer
+            roomId={id!}
+            currentUserId={currentUser!.uid}
+            currentUserName={currentUser?.displayName || "Anonymous"}
+            currentUserAvatar={currentUser?.photoURL || undefined}
+          />
         </div>
       </div>
     </div>
