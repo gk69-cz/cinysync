@@ -1,0 +1,304 @@
+Perfect ✅ — let’s **update the CineSync project description** to include **cross-platform screen sharing**, expanding its scope to a **truly premium, multi-user streaming collaboration ecosystem** that works across devices (web, tablet, and mobile).
+
+Here’s your **revised full professional project requirement document**, ready to hand off to a dev team, upload to a GitHub README, or use as a project blueprint.
+
+---
+
+# 🎬 **Project Name: CineSync**
+
+## 🌐 Overview
+
+**CineSync** is a premium, real-time **collaborative streaming platform** that allows users to watch movies together from **Netflix, Amazon Prime Video, and Disney+**, in perfect sync — across **any device or platform**.
+
+It integrates **authentication (Firebase)**, **real-time chat**, **video presence**, and **cross-platform screen sharing**, offering a **Google Meet-like experience** in a **Discord-inspired dark UI**.
+
+Users can create or join rooms, invite friends, chat, share screens, and enjoy synchronized playback with professional-grade smooth animations and performance — all built using **Next.js** and deployed on **Vercel**.
+
+---
+
+## ⚙️ **Tech Stack**
+
+| Layer                  | Technology                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------- |
+| **Frontend**           | Next.js 14 (App Router) + TypeScript + Tailwind CSS + Framer Motion + Shadcn/UI |
+| **Backend**            | Node.js + Express.js (in `/backend`)                                            |
+| **Authentication**     | Firebase Authentication (Google, Email/Password, Phone)                         |
+| **Database**           | Firebase Firestore or Realtime Database                                         |
+| **Storage**            | Firebase Storage (for avatars, assets)                                          |
+| **Live Communication** | WebRTC + Socket.io for sync and media streams                                   |
+| **Deployment**         | Vercel (Frontend), Render/AWS (Backend)                                         |
+| **Streaming APIs**     | Netflix, Prime Video, Disney+ via OAuth and embedded playback sessions          |
+| **Chat**               | Firebase Realtime DB or Socket.io-based system                                  |
+| **Screen Sharing**     | WebRTC-based cross-platform streaming (Desktop → Web + Mobile)                  |
+
+---
+
+## 🧱 **Project Folder Structure**
+
+```
+CineSync/
+│
+├── frontend/                      # Next.js frontend app
+│   ├── app/
+│   ├── components/
+│   ├── pages/
+│   ├── styles/
+│   ├── utils/
+│   ├── firebase/
+│   └── public/
+│
+└── backend/                       # Node.js + Express backend
+    ├── src/
+    │   ├── controllers/
+    │   ├── routes/
+    │   ├── models/
+    │   ├── middleware/
+    │   └── socket/
+    ├── package.json
+    └── server.js
+```
+
+---
+
+## 🔐 **Authentication System**
+
+### Firebase Authentication
+
+* **Methods:** Email & Password, Google Sign-In, Phone Verification.
+* **Features:**
+
+  * Persistent login.
+  * Reset password & verification flow.
+  * Firebase user profile (avatar, name, email).
+  * Optional 2FA (Firebase multi-factor authentication).
+
+---
+
+## 🖥️ **Screen List and Features**
+
+### **1. Landing Page**
+
+* Dark cinematic background + animated gradient overlay.
+* Call-to-action: *“Start a Watch Party”*.
+* Smooth scroll feature showcase with parallax animations.
+* Navbar: Home | Features | Login | About | Contact.
+
+---
+
+### **2. Authentication Screens**
+
+#### Login
+
+* Fields: Email, Password, Login with Google.
+* Firebase login + error handling.
+* Animations on input focus and success transition.
+
+#### Register
+
+* Fields: Name, Email, Password, Confirm Password.
+* Automatic profile creation in Firestore.
+* Redirect to onboarding screen.
+
+#### Forgot Password
+
+* Simple reset screen with Firebase link trigger.
+
+---
+
+### **3. Dashboard (Main Home)**
+
+* **Layout:**
+
+  * Sidebar (Discord-style) for navigation.
+  * Main grid (Netflix-style) showing streaming service tiles.
+* **Sections:**
+
+  * “My Rooms”
+  * “Friends”
+  * “Discover Rooms”
+  * “Settings”
+* **Features:**
+
+  * User avatar with status dot.
+  * “Start a Watch Party” button.
+  * “Join Room” input for invite codes.
+  * Live indicators for active rooms.
+
+---
+
+### **4. Room Creation Screen**
+
+* **Fields:**
+
+  * Room Name
+  * Streaming Service (Netflix / Prime / Disney)
+  * Paste movie/show URL
+  * Privacy: Public / Private
+* **Feature:**
+  Generates unique join link (e.g., `cinesync.app/room/abc123`).
+* **UI:**
+  Glassmorphism pop-up with neon glow animation.
+
+---
+
+### **5. Room / Streaming Screen (Main Experience)**
+
+#### Layout
+
+| Section           | Description                                           |
+| ----------------- | ----------------------------------------------------- |
+| **Center**        | Embedded Movie Player (Netflix/Prime/Disney playback) |
+| **Right Sidebar** | Live video tiles of participants (WebRTC video grid)  |
+| **Bottom Panel**  | Chat input, mic toggle, screen share button           |
+| **Top Bar**       | Room title, participant count, settings, leave button |
+
+#### Features
+
+* Real-time movie synchronization (pause/play/seek).
+* Chat with emoji reactions.
+* Video tiles for all users.
+* Screen sharing support (one user at a time or group collaboration).
+* Playback control restricted to room host (optional).
+
+#### Animations
+
+* Smooth entry/exit for UI elements (Framer Motion).
+* Floating emoji reactions.
+
+---
+
+### **6. Chat Panel**
+
+* Discord-like message bubbles.
+* Typing indicator (“User is typing…”).
+* Message reactions and emoji picker.
+* Smooth auto-scroll to latest.
+* Option to minimize or pop out the chat.
+
+---
+
+### **7. Cross-Platform Screen Sharing**
+
+#### 🧩 Key Features
+
+* Real-time WebRTC-based screen capture and broadcast.
+* Works on desktop (Chrome, Edge, Firefox) and mobile browsers.
+* Participants can:
+
+  * **Share full screen**, a **browser tab**, or a **window**.
+  * **Switch between camera and screen stream** dynamically.
+* **Resolution auto-adjustment** for bandwidth optimization.
+* Screen-sharing permission prompts are handled gracefully.
+* Shared screen appears in the main player area for viewers.
+* Smooth transition when switching from screen-share → movie → webcam.
+
+#### 🧠 Under the Hood
+
+* Peer-to-peer (WebRTC) for minimal latency.
+* Socket.io for signaling.
+* Fallback relay via TURN/STUN servers.
+* Audio stream capture (if allowed) for shared content.
+* Visual indicator (highlight border) for who’s sharing.
+
+---
+
+### **8. Profile & Settings**
+
+* Update profile picture, username, email.
+* Connect streaming accounts (Netflix, Prime, Disney).
+* Adjust theme, notifications, and camera permissions.
+* Manage privacy (who can invite to room, who can DM).
+
+---
+
+### **9. Friends / Discover**
+
+* Add friend by username/email.
+* Accept/Reject invites.
+* Browse trending public rooms and join instantly.
+* Sort/filter by movie, genre, or number of participants.
+
+---
+
+## 💬 **Real-Time Communication System**
+
+| Component             | Description                                   |
+| --------------------- | --------------------------------------------- |
+| **Text Chat**         | Socket-based real-time messaging inside rooms |
+| **Presence Tracking** | Online/Offline/Idle detection                 |
+| **Typing Indicators** | Realtime updates for active users             |
+| **Reactions**         | Emoji or GIF reactions to messages            |
+| **Video Presence**    | WebRTC-based camera feed tiles                |
+| **Screen Share**      | Cross-platform content broadcast in real-time |
+
+---
+
+## 🎥 **Streaming Integration**
+
+| Platform           | Integration Type        | Details                                                     |
+| ------------------ | ----------------------- | ----------------------------------------------------------- |
+| **Netflix**        | OAuth + Embedded Player | Syncs timestamps across users                               |
+| **Prime Video**    | OAuth + Player Embed    | Synchronized playback                                       |
+| **Disney+**        | OAuth + Secure Embed    | Playback controlled by host                                 |
+| **Custom Sources** | URL Input               | Allow room creators to use other links (for internal demos) |
+
+⚠️ Note: CineSync **does not re-stream or host** content — it only **syncs playback** between logged-in users.
+
+---
+
+## 🧩 **Core Functionalities Summary**
+
+| Category                        | Features                                       |
+| ------------------------------- | ---------------------------------------------- |
+| **Authentication**              | Firebase login + persistent session            |
+| **Room Management**             | Create, Join, Invite, Privacy control          |
+| **Streaming Sync**              | WebRTC-based timestamp synchronization         |
+| **Chat System**                 | Real-time text chat + emoji + reactions        |
+| **Video Presence**              | Live user webcams                              |
+| **Cross-Platform Screen Share** | Share screen from any device                   |
+| **Friend System**               | Add, block, track online friends               |
+| **Discover Rooms**              | Public room exploration                        |
+| **Responsive UI**               | Fully responsive across web, tablet, mobile    |
+| **Settings & Profiles**         | Customization & account linking                |
+| **UI/UX Design**                | Smooth, modern, Discord + Meet-inspired layout |
+
+---
+
+## 🎨 **UI/UX Design Guide**
+
+| Element           | Style                                           |
+| ----------------- | ----------------------------------------------- |
+| **Theme**         | Dark Mode, Cinematic Look                       |
+| **Primary Color** | `#0F0F10` (base), `#1A1A1D` (surface)           |
+| **Accent Colors** | Neon Magenta `#FF0050`, Cyan `#00E0FF`          |
+| **Typography**    | Poppins / Inter                                 |
+| **Buttons**       | Rounded (2xl), soft shadows, hover scaling      |
+| **Icons**         | Lucide React / HeroIcons                        |
+| **Animations**    | Framer Motion transitions, parallax backgrounds |
+
+---
+
+## 🧠 **Advanced & Future Enhancements**
+
+* **Voice Chat Integration** (WebRTC Audio)
+* **AI Movie Recommendations** (based on group watch history)
+* **Custom Reactions / Stickers**
+* **Mobile App (Flutter or React Native)**
+* **Virtual Theater Mode (3D environment for VR)**
+
+---
+
+## 🧰 **Deliverables**
+
+1. Complete **Next.js Frontend** (Firebase-connected, deployable on Vercel).
+2. **Backend Node.js Server** (Socket.io, WebRTC signaling, REST APIs).
+3. **Screen Sharing module** (cross-platform compatible).
+4. **Room management system** with shareable invites.
+5. **UI components** (chat, player, sidebar, profile).
+6. **Documentation** for Firebase setup (just add keys).
+7. **Deployment scripts** for both frontend and backend.
+
+---
+
+Would you like me to now **generate the actual project scaffolding** (with `/frontend` and `/backend` folders, prewired Firebase setup placeholders, socket configuration, and screen-share-ready WebRTC code structure)?
+It will be structured for direct deployment to **Vercel + Render** with all routes and base logic prewritten.
