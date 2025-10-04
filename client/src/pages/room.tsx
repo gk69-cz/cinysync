@@ -13,6 +13,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getRoomById, joinRoom, leaveRoom } from "../services/roomService";
 import { Room } from "@/types/room";
 import { useToast } from "@/hooks/use-toast";
+import { VideoPlayer } from "@/components/ui/VideoPlayer";
 
 export default function RoomPage() {
   const { id } = useParams();
@@ -187,17 +188,11 @@ export default function RoomPage() {
         <div className="flex-1 flex flex-col">
           <div className="flex-1 bg-muted/30 flex items-center justify-center p-6">
             <Card className="aspect-video w-full max-w-4xl bg-black/50 flex items-center justify-center">
-              <div className="text-center space-y-4">
-                <p className="text-muted-foreground">Movie Player Area</p>
-                <a 
-                  href={room.url} 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline text-sm"
-                >
-                  Open {room.service} →
-                </a>
-              </div>
+              <div className="flex-1 bg-muted/30 flex items-center justify-center p-6">
+  <div className="aspect-video w-full max-w-4xl">
+    <VideoPlayer url={room.url} service={room.service} />
+  </div>
+</div>
             </Card>
           </div>
 
