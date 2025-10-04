@@ -58,6 +58,7 @@ export function CreateRoomDialog() {
         createdBy: currentUser.uid,
         createdByName: currentUser.displayName || "Anonymous",
         maxParticipants: 10,
+        roomCode: roomCode
       });
 
       const link = `${window.location.origin}/room/${roomId}`;

@@ -12,7 +12,7 @@ import { CreateRoomDialog } from "@/components/CreateRoomDialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useLocation } from "wouter";
-import { getActiveRooms, getUserRooms, getRoomByCode } from "../services/roomService";
+import { getActiveRooms, getUserRooms, getRoomByCode } from "@/services/roomService";
 import { Room } from "@/types/room";
 import { useToast } from "@/hooks/use-toast";
 
@@ -158,7 +158,9 @@ export default function Dashboard() {
   };
 
   const handleJoinByCode = async () => {
-    if (!joinCode.trim()) {
+    const trimmedCode = joinCode.trim().toUpperCase();
+    
+    if (!trimmedCode) {
       toast({
         title: "Enter a room code",
         description: "Please enter a valid room code",
@@ -167,12 +169,14 @@ export default function Dashboard() {
       return;
     }
 
+    console.log("Attempting to join room with code:", trimmedCode);
     setIsJoining(true);
 
     try {
-      const room = await getRoomByCode(joinCode.trim().toUpperCase());
+      const room = await getRoomByCode(trimmedCode);
 
       if (!room) {
+        console.log("Room not found for code:", trimmedCode);
         toast({
           title: "Room not found",
           description: "Please check the code and try again",
@@ -181,7 +185,10 @@ export default function Dashboard() {
         return;
       }
 
+      console.log("Room found:", room);
+
       if (room.isPrivate && !room.participants.includes(currentUser!.uid)) {
+        console.log("User not authorized for private room");
         toast({
           title: "Private room",
           description: "You need an invitation to join this room",
@@ -190,12 +197,13 @@ export default function Dashboard() {
         return;
       }
 
+      console.log("Navigating to room:", room.id);
       setLocation(`/room/${room.id}`);
     } catch (error) {
       console.error("Error joining room:", error);
       toast({
         title: "Failed to join room",
-        description: "Please try again",
+        description: error instanceof Error ? error.message : "Please try again",
         variant: "destructive",
       });
     } finally {

@@ -2,6 +2,7 @@
 export interface Room {
   id: string;
   roomName: string;
+  roomCode: string;
   service: 'netflix' | 'prime' | 'disney';
   url: string;
   isPrivate: boolean;

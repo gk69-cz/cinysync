@@ -37,14 +37,22 @@ export async function createRoom(
     const roomCode = generateRoomCode();
     
     const roomDoc = {
-      ...roomData,
-      roomCode,
+      roomName: roomData.roomName,
+      service: roomData.service,
+      url: roomData.url,
+      isPrivate: roomData.isPrivate,
+      createdBy: roomData.createdBy,
+      createdByName: roomData.createdByName,
+      maxParticipants: roomData.maxParticipants,
+      roomCode: roomCode,
       participants: [roomData.createdBy],
       isActive: true,
       createdAt: serverTimestamp(),
     };
 
+    console.log("Creating room with data:", roomDoc);
     const docRef = await addDoc(collection(db, ROOMS_COLLECTION), roomDoc);
+    console.log("Room created with ID:", docRef.id, "and code:", roomCode);
 
     return {
       roomId: docRef.id,
