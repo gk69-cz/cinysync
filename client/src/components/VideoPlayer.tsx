@@ -12,9 +12,11 @@ interface VideoPlayerProps {
 
 export function VideoPlayer({ url, service, roomId, userId }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const syncServiceRef = useRef<VideoSyncService | null>(null);
   const isSyncingRef = useRef(false);
+  const youtubePlayerRef = useRef<any>(null);
   
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -24,9 +26,11 @@ export function VideoPlayer({ url, service, roomId, userId }: VideoPlayerProps) 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [buffered, setBuffered] = useState(0);
+  const [youtubeReady, setYoutubeReady] = useState(false);
   const controlsTimeoutRef = useRef<NodeJS.Timeout>();
+  const timeUpdateIntervalRef = useRef<NodeJS.Timeout>();
 
-  // Convert Google Drive URL to embeddable format
+  // Convert URLs to embeddable format
   const getEmbedUrl = (rawUrl: string) => {
     if (rawUrl.includes('drive.google.com')) {
       const fileIdMatch = rawUrl.match(/\/d\/([^\/]+)/);
@@ -34,18 +38,25 @@ export function VideoPlayer({ url, service, roomId, userId }: VideoPlayerProps) 
         return `https://drive.google.com/file/d/${fileIdMatch[1]}/preview`;
       }
     }
+    if (rawUrl.includes('youtube.com') || rawUrl.includes('youtu.be')) {
+      let videoId = '';
+      if (rawUrl.includes('youtube.com/watch')) {
+        videoId = new URL(rawUrl).searchParams.get('v') || '';
+      } else if (rawUrl.includes('youtu.be/')) {
+        videoId = rawUrl.split('youtu.be/')[1].split('?')[0];
+      }
+      return `https://www.youtube.com/embed/${videoId}?enablejsapi=1&origin=${window.location.origin}`;
+    }
     return rawUrl;
   };
 
   const embedUrl = getEmbedUrl(url);
   const isGoogleDrive = url.includes('drive.google.com');
   const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
-  const isDirectVideo = url.match(/\.(mp4|webm|ogg|m3u8)$/i);
+  const isDirectVideo = !isGoogleDrive && !isYouTube;
 
   // Initialize sync service
   useEffect(() => {
-    if (!isDirectVideo) return; // Only sync direct video files
-
     const syncService = new VideoSyncService(roomId, userId);
     syncServiceRef.current = syncService;
 
@@ -56,28 +67,95 @@ export function VideoPlayer({ url, service, roomId, userId }: VideoPlayerProps) 
     return () => {
       unsubscribe();
       syncService.cleanup();
+      if (timeUpdateIntervalRef.current) {
+        clearInterval(timeUpdateIntervalRef.current);
+      }
     };
-  }, [roomId, userId, isDirectVideo]);
+  }, [roomId, userId]);
+
+  // Initialize YouTube player with API
+  useEffect(() => {
+    if (!isYouTube) return;
+
+    const initYouTubePlayer = () => {
+      if (!(window as any).YT) {
+        const tag = document.createElement('script');
+        tag.src = 'https://www.youtube.com/iframe_api';
+        const firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+
+        (window as any).onYouTubeIframeAPIReady = () => {
+          createYouTubePlayer();
+        };
+      } else {
+        createYouTubePlayer();
+      }
+    };
+
+    const createYouTubePlayer = () => {
+      if (!iframeRef.current) return;
+      
+      youtubePlayerRef.current = new (window as any).YT.Player(iframeRef.current, {
+        events: {
+          onReady: (event: any) => {
+            setYoutubeReady(true);
+            timeUpdateIntervalRef.current = setInterval(() => {
+              if (youtubePlayerRef.current?.getCurrentTime) {
+                setCurrentTime(youtubePlayerRef.current.getCurrentTime());
+                setDuration(youtubePlayerRef.current.getDuration());
+              }
+            }, 500);
+          },
+          onStateChange: (event: any) => {
+            const state = event.data;
+            if (state === 1) setIsPlaying(true);
+            if (state === 2) setIsPlaying(false);
+          },
+        },
+      });
+    };
+
+    const timer = setTimeout(initYouTubePlayer, 500);
+
+    return () => {
+      clearTimeout(timer);
+      if (timeUpdateIntervalRef.current) {
+        clearInterval(timeUpdateIntervalRef.current);
+      }
+    };
+  }, [isYouTube]);
 
   // Handle remote state changes from other users
   const handleRemoteStateChange = (state: VideoState) => {
-    const video = videoRef.current;
-    if (!video || isSyncingRef.current) return;
-
+    if (isSyncingRef.current) return;
     isSyncingRef.current = true;
 
-    // Sync time if difference is significant (> 1 second)
-    if (Math.abs(video.currentTime - state.currentTime) > 1) {
-      video.currentTime = state.currentTime;
-    }
+    if (isYouTube && youtubePlayerRef.current && youtubeReady) {
+      const currentTime = youtubePlayerRef.current.getCurrentTime();
+      
+      if (Math.abs(currentTime - state.currentTime) > 2) {
+        youtubePlayerRef.current.seekTo(state.currentTime, true);
+      }
 
-    // Sync play/pause state
-    if (state.isPlaying && video.paused) {
-      video.play().catch(console.error);
-      setIsPlaying(true);
-    } else if (!state.isPlaying && !video.paused) {
-      video.pause();
-      setIsPlaying(false);
+      if (state.isPlaying) {
+        youtubePlayerRef.current.playVideo();
+      } else {
+        youtubePlayerRef.current.pauseVideo();
+      }
+    } else if (isDirectVideo && videoRef.current) {
+      const video = videoRef.current;
+      
+      if (Math.abs(video.currentTime - state.currentTime) > 1) {
+        video.currentTime = state.currentTime;
+      }
+
+      if (state.isPlaying && video.paused) {
+        video.play().catch(console.error);
+        setIsPlaying(true);
+      } else if (!state.isPlaying && !video.paused) {
+        video.pause();
+        setIsPlaying(false);
+      }
     }
 
     setTimeout(() => {
@@ -85,6 +163,7 @@ export function VideoPlayer({ url, service, roomId, userId }: VideoPlayerProps) 
     }, 100);
   };
 
+  // Direct video event listeners
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -109,59 +188,73 @@ export function VideoPlayer({ url, service, roomId, userId }: VideoPlayerProps) 
   }, []);
 
   const togglePlay = async () => {
-    const video = videoRef.current;
-    if (!video || !syncServiceRef.current) return;
+    if (!syncServiceRef.current) return;
 
-    if (isPlaying) {
-      video.pause();
-      setIsPlaying(false);
-      await syncServiceRef.current.syncPause(video.currentTime);
-    } else {
-      video.play();
-      setIsPlaying(true);
-      await syncServiceRef.current.syncPlay(video.currentTime);
+    if (isYouTube && youtubePlayerRef.current && youtubeReady) {
+      const currentTime = youtubePlayerRef.current.getCurrentTime();
+      if (isPlaying) {
+        youtubePlayerRef.current.pauseVideo();
+        await syncServiceRef.current.syncPause(currentTime);
+      } else {
+        youtubePlayerRef.current.playVideo();
+        await syncServiceRef.current.syncPlay(currentTime);
+      }
+    } else if (videoRef.current) {
+      const video = videoRef.current;
+      if (isPlaying) {
+        video.pause();
+        await syncServiceRef.current.syncPause(video.currentTime);
+      } else {
+        video.play();
+        await syncServiceRef.current.syncPlay(video.currentTime);
+      }
     }
   };
 
-  const toggleMute = () => {
-    const video = videoRef.current;
-    if (!video) return;
+  const handleSeek = async (newTime: number) => {
+    if (!syncServiceRef.current) return;
 
-    video.muted = !isMuted;
-    setIsMuted(!isMuted);
-  };
-
-  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const newVolume = parseFloat(e.target.value);
-    video.volume = newVolume;
-    setVolume(newVolume);
-    setIsMuted(newVolume === 0);
-  };
-
-  const handleSeek = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const video = videoRef.current;
-    if (!video || !syncServiceRef.current) return;
-
-    const newTime = parseFloat(e.target.value);
-    video.currentTime = newTime;
-    setCurrentTime(newTime);
-    
-    // Sync the seek with other users
-    await syncServiceRef.current.syncSeek(newTime, isPlaying);
+    if (isYouTube && youtubePlayerRef.current && youtubeReady) {
+      youtubePlayerRef.current.seekTo(newTime, true);
+      setCurrentTime(newTime);
+      await syncServiceRef.current.syncSeek(newTime, isPlaying);
+    } else if (videoRef.current) {
+      videoRef.current.currentTime = newTime;
+      setCurrentTime(newTime);
+      await syncServiceRef.current.syncSeek(newTime, isPlaying);
+    }
   };
 
   const skip = async (seconds: number) => {
-    const video = videoRef.current;
-    if (!video || !syncServiceRef.current) return;
+    const newTime = Math.max(0, Math.min(duration, currentTime + seconds));
+    await handleSeek(newTime);
+  };
 
-    const newTime = Math.max(0, Math.min(video.duration, video.currentTime + seconds));
-    video.currentTime = newTime;
+  const toggleMute = () => {
+    if (isYouTube && youtubePlayerRef.current && youtubeReady) {
+      if (isMuted) {
+        youtubePlayerRef.current.unMute();
+      } else {
+        youtubePlayerRef.current.mute();
+      }
+      setIsMuted(!isMuted);
+    } else if (videoRef.current) {
+      videoRef.current.muted = !isMuted;
+      setIsMuted(!isMuted);
+    }
+  };
+
+  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVolume = parseFloat(e.target.value);
     
-    // Sync the skip with other users
-    await syncServiceRef.current.syncSeek(newTime, isPlaying);
+    if (isYouTube && youtubePlayerRef.current && youtubeReady) {
+      youtubePlayerRef.current.setVolume(newVolume * 100);
+    } else if (videoRef.current) {
+      videoRef.current.volume = newVolume;
+    }
+    
+    setVolume(newVolume);
+    setIsMuted(newVolume === 0);
   };
 
   const toggleFullscreen = () => {
@@ -197,8 +290,8 @@ export function VideoPlayer({ url, service, roomId, userId }: VideoPlayerProps) 
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // For Google Drive and other iframe-based players
-  if (isGoogleDrive || isYouTube) {
+  // For Google Drive - show iframe with warning
+  if (isGoogleDrive) {
     return (
       <div className="relative w-full h-full bg-black rounded-lg overflow-hidden">
         <iframe
@@ -208,8 +301,135 @@ export function VideoPlayer({ url, service, roomId, userId }: VideoPlayerProps) 
           allowFullScreen
           frameBorder="0"
         />
-        <div className="absolute bottom-4 left-4 bg-yellow-500/90 text-black px-3 py-1 rounded text-sm">
-          ⚠️ Sync not available for embedded videos
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-yellow-500/90 text-black px-4 py-2 rounded-lg text-sm font-medium shadow-lg">
+          ⚠️ Google Drive videos cannot be synced due to browser security restrictions
+        </div>
+      </div>
+    );
+  }
+
+  // For YouTube with controls
+  if (isYouTube) {
+    return (
+      <div
+        ref={containerRef}
+        className="relative w-full h-full bg-black rounded-lg overflow-hidden group"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => isPlaying && setShowControls(false)}
+      >
+        <div id="youtube-player" className="w-full h-full">
+          <iframe
+            ref={iframeRef}
+            src={embedUrl}
+            className="w-full h-full"
+            allow="autoplay; encrypted-media; fullscreen; accelerometer; gyroscope"
+            allowFullScreen
+            frameBorder="0"
+          />
+        </div>
+
+        {/* Sync Indicator */}
+        {youtubeReady && (
+          <div className="absolute top-4 right-4 bg-green-500/90 text-white px-3 py-1 rounded-full text-xs font-medium flex items-center gap-2 pointer-events-none">
+            <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+            Synced
+          </div>
+        )}
+
+        {/* Custom Controls Overlay */}
+        <div
+          className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent transition-opacity duration-300 pointer-events-auto ${
+            showControls ? 'opacity-100' : 'opacity-0'
+          }`}
+        >
+          {/* Progress Bar */}
+          <div className="px-4 pt-4">
+            <div className="relative group/progress">
+              <input
+                type="range"
+                min="0"
+                max={duration || 0}
+                value={currentTime}
+                onChange={(e) => handleSeek(parseFloat(e.target.value))}
+                className="w-full h-1 appearance-none bg-gray-600 rounded-full cursor-pointer relative z-10
+                  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 
+                  [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-red-600 
+                  [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:transition-all
+                  group-hover/progress:[&::-webkit-slider-thumb]:w-4 group-hover/progress:[&::-webkit-slider-thumb]:h-4
+                  [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full 
+                  [&::-moz-range-thumb]:bg-red-600 [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer"
+                style={{
+                  background: `linear-gradient(to right, #dc2626 0%, #dc2626 ${(currentTime / duration) * 100}%, #4b5563 ${(currentTime / duration) * 100}%, #4b5563 100%)`
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Control Buttons */}
+          <div className="flex items-center justify-between px-4 pb-4 pt-2">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={togglePlay}
+                className="text-white hover:text-red-600 transition-colors p-2"
+                disabled={!youtubeReady}
+              >
+                {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
+              </button>
+
+              <button
+                onClick={() => skip(-10)}
+                className="text-white hover:text-red-600 transition-colors p-2"
+                disabled={!youtubeReady}
+              >
+                <SkipBack className="w-5 h-5" />
+              </button>
+
+              <button
+                onClick={() => skip(10)}
+                className="text-white hover:text-red-600 transition-colors p-2"
+                disabled={!youtubeReady}
+              >
+                <SkipForward className="w-5 h-5" />
+              </button>
+
+              <button
+                onClick={toggleMute}
+                className="text-white hover:text-red-600 transition-colors p-2"
+                disabled={!youtubeReady}
+              >
+                {isMuted ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
+              </button>
+
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={isMuted ? 0 : volume}
+                onChange={handleVolumeChange}
+                disabled={!youtubeReady}
+                className="w-20 h-1 appearance-none bg-gray-600 rounded-full cursor-pointer
+                  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 
+                  [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white 
+                  [&::-webkit-slider-thumb]:cursor-pointer
+                  [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full 
+                  [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0"
+              />
+
+              <span className="text-white text-sm font-medium ml-2">
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleFullscreen}
+                className="text-white hover:text-red-600 transition-colors p-2"
+              >
+                {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -258,20 +478,18 @@ export function VideoPlayer({ url, service, roomId, userId }: VideoPlayerProps) 
         {/* Progress Bar */}
         <div className="px-4 pt-4">
           <div className="relative group/progress">
-            {/* Buffered Bar */}
             <div className="absolute top-1/2 -translate-y-1/2 h-1 bg-gray-600 rounded-full w-full">
               <div
                 className="h-full bg-gray-500 rounded-full transition-all"
                 style={{ width: `${buffered}%` }}
               />
             </div>
-            {/* Progress Bar */}
             <input
               type="range"
               min="0"
               max={duration || 0}
               value={currentTime}
-              onChange={handleSeek}
+              onChange={(e) => handleSeek(parseFloat(e.target.value))}
               className="w-full h-1 appearance-none bg-transparent cursor-pointer relative z-10
                 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 
                 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-red-600 

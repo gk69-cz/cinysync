@@ -6,9 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Copy, Check } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Plus, Copy, Check, Upload, Film, X, Link as LinkIcon } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { createRoom } from "@/services/roomService";
+import { VideoUploadService } from "@/services/videoUploadService";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
 
@@ -24,15 +26,101 @@ export function CreateRoomDialog() {
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState(false);
 
+  // Video upload states
+  const [uploadMode, setUploadMode] = useState<'url' | 'upload'>('url');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
   const { currentUser } = useAuth();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('video/')) {
+      toast({
+        title: "Invalid file type",
+        description: "Please select a video file",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate file size (500MB max)
+    const maxSize = 500 * 1024 * 1024;
+    if (file.size > maxSize) {
+      toast({
+        title: "File too large",
+        description: "Video must be less than 500MB",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSelectedFile(file);
+  };
+
+  const handleUploadVideo = async (): Promise<string> => {
+    if (!selectedFile) throw new Error("No file selected");
+
+    setIsUploading(true);
+    setUploadProgress(0);
+
+    try {
+      const downloadUrl = await VideoUploadService.uploadVideo(
+        selectedFile,
+        (progress) => {
+          setUploadProgress(Math.round(progress.progress));
+        }
+      );
+
+      toast({
+        title: "Upload complete!",
+        description: "Your video is ready",
+      });
+
+      return downloadUrl;
+    } catch (error) {
+      console.error("Upload error:", error);
+      toast({
+        title: "Upload failed",
+        description: error instanceof Error ? error.message : "Please try again",
+        variant: "destructive",
+      });
+      throw error;
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handleCreate = async () => {
-    if (!roomName.trim() || !service || !url.trim()) {
+    if (!roomName.trim() || !service) {
       toast({
         title: "Missing information",
         description: "Please fill in all required fields",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Check if URL or file is provided
+    if (uploadMode === 'url' && !url.trim()) {
+      toast({
+        title: "Missing URL",
+        description: "Please provide a video URL",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (uploadMode === 'upload' && !selectedFile) {
+      toast({
+        title: "Missing file",
+        description: "Please select a video file to upload",
         variant: "destructive",
       });
       return;
@@ -50,10 +138,16 @@ export function CreateRoomDialog() {
     setIsCreating(true);
 
     try {
+      // Upload video if in upload mode
+      let videoUrl = url.trim();
+      if (uploadMode === 'upload') {
+        videoUrl = await handleUploadVideo();
+      }
+
       const { roomId, roomCode: code } = await createRoom({
         roomName: roomName.trim(),
         service: service as 'netflix' | 'prime' | 'disney',
-        url: url.trim(),
+        url: videoUrl,
         isPrivate,
         createdBy: currentUser.uid,
         createdByName: currentUser.displayName || "Anonymous",
@@ -131,6 +225,9 @@ export function CreateRoomDialog() {
     setRoomLink("");
     setRoomCode("");
     setCopied(false);
+    setSelectedFile(null);
+    setUploadProgress(0);
+    setUploadMode('url');
   };
 
   const handleOpenChange = (newOpen: boolean) => {
@@ -138,6 +235,11 @@ export function CreateRoomDialog() {
     if (!newOpen) {
       resetForm();
     }
+  };
+
+  const removeSelectedFile = () => {
+    setSelectedFile(null);
+    setUploadProgress(0);
   };
 
   return (
@@ -148,7 +250,7 @@ export function CreateRoomDialog() {
           Create Watch Party
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-2xl bg-card/95 backdrop-blur-xl border-primary/20">
+      <DialogContent className="sm:max-w-2xl bg-card/95 backdrop-blur-xl border-primary/20 max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl">
             {showSuccess ? "Room Created!" : "Create a Watch Party"}
@@ -179,20 +281,99 @@ export function CreateRoomDialog() {
                   <SelectItem value="netflix">Netflix</SelectItem>
                   <SelectItem value="prime">Prime Video</SelectItem>
                   <SelectItem value="disney">Disney+</SelectItem>
+                  <SelectItem value="youtube">YouTube</SelectItem>
+                  <SelectItem value="direct">Direct Video URL</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            
+
             <div className="space-y-2">
-              <Label htmlFor="url">Movie/Show URL *</Label>
-              <Input
-                id="url"
-                placeholder="https://..."
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                className="h-12 rounded-xl"
-                data-testid="input-url"
-              />
+              <Label>Video Source *</Label>
+              <Tabs value={uploadMode} onValueChange={(v) => setUploadMode(v as 'url' | 'upload')}>
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="url" className="gap-2">
+                    <LinkIcon className="h-4 w-4" />
+                    URL
+                  </TabsTrigger>
+                  <TabsTrigger value="upload" className="gap-2">
+                    <Upload className="h-4 w-4" />
+                    Upload Video
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="url" className="mt-4">
+                  <div className="space-y-2">
+                    <Input
+                      id="url"
+                      placeholder="https://..."
+                      value={url}
+                      onChange={(e) => setUrl(e.target.value)}
+                      className="h-12 rounded-xl"
+                      data-testid="input-url"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Enter a YouTube, Netflix, or direct video URL
+                    </p>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="upload" className="mt-4">
+                  {!selectedFile ? (
+                    <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-primary/30 rounded-xl cursor-pointer hover:border-primary/50 transition-colors bg-primary/5 hover:bg-primary/10">
+                      <Upload className="w-8 h-8 text-primary mb-2" />
+                      <p className="text-sm text-muted-foreground mb-1">
+                        Click to upload video
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        MP4, WebM, MOV (max 500MB)
+                      </p>
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept="video/*"
+                        onChange={handleFileSelect}
+                      />
+                    </label>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between p-4 bg-primary/10 rounded-xl border border-primary/20">
+                        <div className="flex items-center gap-3">
+                          <Film className="w-8 h-8 text-primary" />
+                          <div>
+                            <p className="font-medium text-sm">{selectedFile.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={removeSelectedFile}
+                          disabled={isUploading}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+
+                      {isUploading && (
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">Uploading...</span>
+                            <span className="font-medium">{uploadProgress}%</span>
+                          </div>
+                          <div className="w-full h-2 bg-primary/20 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-primary transition-all duration-300"
+                              style={{ width: `${uploadProgress}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
             </div>
             
             <div className="flex items-center justify-between">
@@ -211,10 +392,10 @@ export function CreateRoomDialog() {
             <Button 
               onClick={handleCreate} 
               className="w-full h-12 rounded-2xl" 
-              disabled={isCreating}
+              disabled={isCreating || isUploading}
               data-testid="button-submit-create-room"
             >
-              {isCreating ? "Creating..." : "Create Room"}
+              {isCreating ? "Creating..." : isUploading ? "Uploading..." : "Create Room"}
             </Button>
           </div>
         ) : (
