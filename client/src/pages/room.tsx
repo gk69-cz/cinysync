@@ -249,7 +249,12 @@ const toggleVideo = () => {
           {/* Video Player Area */}
           <div className="flex-1 bg-muted/30 flex items-center justify-center p-6">
             <div className="aspect-video w-full max-w-4xl">
-              <VideoPlayer url={room.url} service={room.service} />
+               <VideoPlayer 
+                url={room.url} 
+                service={room.service}
+                roomId={id!}
+                userId={currentUser!.uid}
+              />
             </div>
           </div>
 

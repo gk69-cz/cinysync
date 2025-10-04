@@ -1,15 +1,21 @@
 // client/src/components/VideoPlayer.tsx
 import { useState, useRef, useEffect } from 'react';
 import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, Settings, SkipBack, SkipForward } from 'lucide-react';
+import { VideoSyncService, VideoState } from '@/services/videoSyncService';
 
 interface VideoPlayerProps {
   url: string;
   service?: string;
+  roomId: string;
+  userId: string;
 }
 
-export function VideoPlayer({ url, service }: VideoPlayerProps) {
+export function VideoPlayer({ url, service, roomId, userId }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const syncServiceRef = useRef<VideoSyncService | null>(null);
+  const isSyncingRef = useRef(false);
+  
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(1);
@@ -36,6 +42,49 @@ export function VideoPlayer({ url, service }: VideoPlayerProps) {
   const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
   const isDirectVideo = url.match(/\.(mp4|webm|ogg|m3u8)$/i);
 
+  // Initialize sync service
+  useEffect(() => {
+    if (!isDirectVideo) return; // Only sync direct video files
+
+    const syncService = new VideoSyncService(roomId, userId);
+    syncServiceRef.current = syncService;
+
+    const unsubscribe = syncService.subscribeToVideoState((state: VideoState) => {
+      handleRemoteStateChange(state);
+    });
+
+    return () => {
+      unsubscribe();
+      syncService.cleanup();
+    };
+  }, [roomId, userId, isDirectVideo]);
+
+  // Handle remote state changes from other users
+  const handleRemoteStateChange = (state: VideoState) => {
+    const video = videoRef.current;
+    if (!video || isSyncingRef.current) return;
+
+    isSyncingRef.current = true;
+
+    // Sync time if difference is significant (> 1 second)
+    if (Math.abs(video.currentTime - state.currentTime) > 1) {
+      video.currentTime = state.currentTime;
+    }
+
+    // Sync play/pause state
+    if (state.isPlaying && video.paused) {
+      video.play().catch(console.error);
+      setIsPlaying(true);
+    } else if (!state.isPlaying && !video.paused) {
+      video.pause();
+      setIsPlaying(false);
+    }
+
+    setTimeout(() => {
+      isSyncingRef.current = false;
+    }, 100);
+  };
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -59,16 +108,19 @@ export function VideoPlayer({ url, service }: VideoPlayerProps) {
     };
   }, []);
 
-  const togglePlay = () => {
+  const togglePlay = async () => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !syncServiceRef.current) return;
 
     if (isPlaying) {
       video.pause();
+      setIsPlaying(false);
+      await syncServiceRef.current.syncPause(video.currentTime);
     } else {
       video.play();
+      setIsPlaying(true);
+      await syncServiceRef.current.syncPlay(video.currentTime);
     }
-    setIsPlaying(!isPlaying);
   };
 
   const toggleMute = () => {
@@ -89,20 +141,27 @@ export function VideoPlayer({ url, service }: VideoPlayerProps) {
     setIsMuted(newVolume === 0);
   };
 
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSeek = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !syncServiceRef.current) return;
 
     const newTime = parseFloat(e.target.value);
     video.currentTime = newTime;
     setCurrentTime(newTime);
+    
+    // Sync the seek with other users
+    await syncServiceRef.current.syncSeek(newTime, isPlaying);
   };
 
-  const skip = (seconds: number) => {
+  const skip = async (seconds: number) => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !syncServiceRef.current) return;
 
-    video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seconds));
+    const newTime = Math.max(0, Math.min(video.duration, video.currentTime + seconds));
+    video.currentTime = newTime;
+    
+    // Sync the skip with other users
+    await syncServiceRef.current.syncSeek(newTime, isPlaying);
   };
 
   const toggleFullscreen = () => {
@@ -149,6 +208,9 @@ export function VideoPlayer({ url, service }: VideoPlayerProps) {
           allowFullScreen
           frameBorder="0"
         />
+        <div className="absolute bottom-4 left-4 bg-yellow-500/90 text-black px-3 py-1 rounded text-sm">
+          ⚠️ Sync not available for embedded videos
+        </div>
       </div>
     );
   }
@@ -169,6 +231,12 @@ export function VideoPlayer({ url, service }: VideoPlayerProps) {
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
       />
+
+      {/* Sync Indicator */}
+      <div className="absolute top-4 right-4 bg-green-500/90 text-white px-3 py-1 rounded-full text-xs font-medium flex items-center gap-2">
+        <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+        Synced
+      </div>
 
       {/* Play/Pause Overlay */}
       <div
