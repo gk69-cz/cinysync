@@ -1,5 +1,6 @@
-import { ref, onValue, set, off, serverTimestamp, getDatabase } from 'firebase/database';
-import firebaseApp from '@/lib/firebase';
+import { ref, onValue, set, off, getDatabase } from 'firebase/database';
+import firebaseApp, { auth } from '@/lib/firebase';
+import { requireAuth } from '@/lib/auth';
 
 const realtimeDb = getDatabase(firebaseApp);
 
@@ -15,7 +16,9 @@ export class VideoSyncService {
   private userId: string;
   private videoStateRef: any;
   private unsubscribe: (() => void) | null = null;
-  private isLocalUpdate = false;
+  private lastUpdateTime = 0;
+  private updateDebounceMs = 200; // Debounce seek updates
+  private syncThreshold = 2; // Sync if difference > 2 seconds
 
   constructor(roomId: string, userId: string) {
     this.roomId = roomId;
@@ -27,31 +30,51 @@ export class VideoSyncService {
   subscribeToVideoState(
     onStateChange: (state: VideoState) => void
   ): () => void {
+    requireAuth(); // Check authentication
+
     const callback = onValue(this.videoStateRef, (snapshot) => {
       const state = snapshot.val() as VideoState | null;
-      if (state && !this.isLocalUpdate && state.updatedBy !== this.userId) {
-        onStateChange(state);
+      
+      if (state && state.updatedBy !== this.userId) {
+        // Only sync if timestamp is recent (within 5 seconds)
+        const timeDiff = Date.now() - state.timestamp;
+        if (timeDiff < 5000) {
+          onStateChange(state);
+        }
       }
-      // Reset the flag after processing
-      this.isLocalUpdate = false;
     });
 
     this.unsubscribe = () => off(this.videoStateRef);
     return this.unsubscribe;
   }
 
-  // Update video state (called by the user making changes)
-  async updateVideoState(state: Partial<VideoState>): Promise<void> {
-    this.isLocalUpdate = true;
+  // Update video state (with debouncing for seeks)
+  private async updateVideoState(state: Partial<VideoState>): Promise<void> {
+    requireAuth();
+
+    const now = Date.now();
+    
+    // Debounce updates (except play/pause which should be immediate)
+    if (state.isPlaying === undefined) {
+      if (now - this.lastUpdateTime < this.updateDebounceMs) {
+        return; // Skip this update
+      }
+    }
+    
+    this.lastUpdateTime = now;
+
     try {
       await set(this.videoStateRef, {
         ...state,
-        timestamp: Date.now(),
+        timestamp: now,
         updatedBy: this.userId,
       });
     } catch (error) {
       console.error('Error updating video state:', error);
-      this.isLocalUpdate = false;
+      // Redirect if auth error
+      if (error instanceof Error && error.message.includes('permission')) {
+        window.location.href = '/login';
+      }
       throw error;
     }
   }
@@ -60,7 +83,7 @@ export class VideoSyncService {
   async syncPlay(currentTime: number): Promise<void> {
     await this.updateVideoState({
       isPlaying: true,
-      currentTime,
+      currentTime: Math.floor(currentTime * 10) / 10, // Round to 1 decimal
     });
   }
 
@@ -68,16 +91,28 @@ export class VideoSyncService {
   async syncPause(currentTime: number): Promise<void> {
     await this.updateVideoState({
       isPlaying: false,
-      currentTime,
+      currentTime: Math.floor(currentTime * 10) / 10,
     });
   }
 
-  // Sync seek
+  // Sync seek (debounced)
   async syncSeek(currentTime: number, isPlaying: boolean): Promise<void> {
     await this.updateVideoState({
-      currentTime,
+      currentTime: Math.floor(currentTime * 10) / 10,
       isPlaying,
     });
+  }
+
+  // Check if local video needs sync (call this periodically if playing)
+  shouldSync(localTime: number, remoteState: VideoState): boolean {
+    if (!remoteState.isPlaying) return false;
+    
+    // Calculate expected remote time based on timestamp
+    const timeSinceUpdate = (Date.now() - remoteState.timestamp) / 1000;
+    const expectedRemoteTime = remoteState.currentTime + timeSinceUpdate;
+    
+    // Sync if difference exceeds threshold
+    return Math.abs(localTime - expectedRemoteTime) > this.syncThreshold;
   }
 
   // Cleanup

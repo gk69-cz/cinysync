@@ -2,7 +2,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, Settings, SkipBack, SkipForward } from 'lucide-react';
 import { VideoSyncService, VideoState } from '@/services/videoSyncService';
-
+import { ref, get } from 'firebase/database';
+import { getDatabase } from 'firebase/database';
+import firebaseApp  from '@/lib/firebase';
+const realtimeDb = getDatabase(firebaseApp);
 interface VideoPlayerProps {
   url: string;
   service?: string;
@@ -29,9 +32,10 @@ export function VideoPlayer({ url, service, roomId, userId }: VideoPlayerProps) 
   const [youtubeReady, setYoutubeReady] = useState(false);
   const controlsTimeoutRef = useRef<NodeJS.Timeout>();
   const timeUpdateIntervalRef = useRef<NodeJS.Timeout>();
+const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'disconnected'>('synced');
 
   // Convert URLs to embeddable format
-  const getEmbedUrl = (rawUrl: string) => {
+ const getEmbedUrl = (rawUrl: string) => {
     if (rawUrl.includes('drive.google.com')) {
       const fileIdMatch = rawUrl.match(/\/d\/([^\/]+)/);
       if (fileIdMatch) {
@@ -39,14 +43,14 @@ export function VideoPlayer({ url, service, roomId, userId }: VideoPlayerProps) 
       }
     }
     if (rawUrl.includes('youtube.com') || rawUrl.includes('youtu.be')) {
-      let videoId = '';
-      if (rawUrl.includes('youtube.com/watch')) {
-        videoId = new URL(rawUrl).searchParams.get('v') || '';
-      } else if (rawUrl.includes('youtu.be/')) {
-        videoId = rawUrl.split('youtu.be/')[1].split('?')[0];
-      }
-      return `https://www.youtube.com/embed/${videoId}?enablejsapi=1&origin=${window.location.origin}`;
+    let videoId = '';
+    if (rawUrl.includes('youtube.com/watch')) {
+      videoId = new URL(rawUrl).searchParams.get('v') || '';
+    } else if (rawUrl.includes('youtu.be/')) {
+      videoId = rawUrl.split('youtu.be/')[1].split('?')[0];
     }
+        return `https://www.youtube.com/embed/${videoId}?enablejsapi=1&controls=0&disablekb=1&origin=${window.location.origin}`;
+  }
     return rawUrl;
   };
 
@@ -56,22 +60,40 @@ export function VideoPlayer({ url, service, roomId, userId }: VideoPlayerProps) 
   const isDirectVideo = !isGoogleDrive && !isYouTube;
 
   // Initialize sync service
-  useEffect(() => {
-    const syncService = new VideoSyncService(roomId, userId);
-    syncServiceRef.current = syncService;
+  // Add this useEffect for periodic drift correction
+useEffect(() => {
+  if (!syncServiceRef.current || !isPlaying) return;
 
-    const unsubscribe = syncService.subscribeToVideoState((state: VideoState) => {
-      handleRemoteStateChange(state);
-    });
+  const driftCheckInterval = setInterval(() => {
+    // Get current remote state from Firebase
+    const videoStateRef = ref(realtimeDb, `rooms/${roomId}/videoState`);
+    
+    get(videoStateRef).then((snapshot) => {
+      const remoteState = snapshot.val() as VideoState | null;
+      if (!remoteState || remoteState.updatedBy === userId) return;
 
-    return () => {
-      unsubscribe();
-      syncService.cleanup();
-      if (timeUpdateIntervalRef.current) {
-        clearInterval(timeUpdateIntervalRef.current);
+      const shouldSync = syncServiceRef.current!.shouldSync(
+        isYouTube ? (youtubePlayerRef.current?.getCurrentTime() || 0) : (videoRef.current?.currentTime || 0),
+        remoteState
+      );
+
+      if (shouldSync) {
+        console.log('Correcting drift...');
+        // Calculate time with latency compensation
+        const timeSinceUpdate = (Date.now() - remoteState.timestamp) / 1000;
+        const predictedTime = remoteState.currentTime + (remoteState.isPlaying ? timeSinceUpdate : 0);
+
+        if (isYouTube && youtubePlayerRef.current && youtubeReady) {
+          youtubePlayerRef.current.seekTo(predictedTime, true);
+        } else if (videoRef.current) {
+          videoRef.current.currentTime = predictedTime;
+        }
       }
-    };
-  }, [roomId, userId]);
+    });
+  }, 3000); // Check every 3 seconds
+
+  return () => clearInterval(driftCheckInterval);
+}, [isPlaying, roomId, userId, isYouTube, youtubeReady]);
 
   // Initialize YouTube player with API
   useEffect(() => {
@@ -127,41 +149,50 @@ export function VideoPlayer({ url, service, roomId, userId }: VideoPlayerProps) 
 
   // Handle remote state changes from other users
   const handleRemoteStateChange = (state: VideoState) => {
-    if (isSyncingRef.current) return;
-    isSyncingRef.current = true;
+  if (isSyncingRef.current) return;
+  isSyncingRef.current = true;
 
-    if (isYouTube && youtubePlayerRef.current && youtubeReady) {
-      const currentTime = youtubePlayerRef.current.getCurrentTime();
-      
-      if (Math.abs(currentTime - state.currentTime) > 2) {
-        youtubePlayerRef.current.seekTo(state.currentTime, true);
-      }
+  // Calculate predicted time with latency compensation
+  const latency = Date.now() - state.timestamp;
+  const predictedTime = state.currentTime + (state.isPlaying ? latency / 1000 : 0);
 
-      if (state.isPlaying) {
-        youtubePlayerRef.current.playVideo();
-      } else {
-        youtubePlayerRef.current.pauseVideo();
-      }
-    } else if (isDirectVideo && videoRef.current) {
-      const video = videoRef.current;
-      
-      if (Math.abs(video.currentTime - state.currentTime) > 1) {
-        video.currentTime = state.currentTime;
-      }
-
-      if (state.isPlaying && video.paused) {
-        video.play().catch(console.error);
-        setIsPlaying(true);
-      } else if (!state.isPlaying && !video.paused) {
-        video.pause();
-        setIsPlaying(false);
-      }
+  if (isYouTube && youtubePlayerRef.current && youtubeReady) {
+    const currentTime = youtubePlayerRef.current.getCurrentTime();
+    
+    // Only seek if difference is significant (>2s)
+    if (Math.abs(currentTime - predictedTime) > 2) {
+      youtubePlayerRef.current.seekTo(predictedTime, true);
     }
 
-    setTimeout(() => {
-      isSyncingRef.current = false;
-    }, 100);
-  };
+    // Sync play state
+    const playerState = youtubePlayerRef.current.getPlayerState();
+    const isCurrentlyPlaying = playerState === 1; // 1 = playing in YouTube API
+    
+    if (state.isPlaying && !isCurrentlyPlaying) {
+      youtubePlayerRef.current.playVideo();
+    } else if (!state.isPlaying && isCurrentlyPlaying) {
+      youtubePlayerRef.current.pauseVideo();
+    }
+  } else if (isDirectVideo && videoRef.current) {
+    const video = videoRef.current;
+    
+    if (Math.abs(video.currentTime - predictedTime) > 1) {
+      video.currentTime = predictedTime;
+    }
+
+    if (state.isPlaying && video.paused) {
+      video.play().catch(console.error);
+      setIsPlaying(true);
+    } else if (!state.isPlaying && !video.paused) {
+      video.pause();
+      setIsPlaying(false);
+    }
+  }
+
+  setTimeout(() => {
+    isSyncingRef.current = false;
+  }, 200); // Increased to 200ms
+};
 
   // Direct video event listeners
   useEffect(() => {
@@ -453,10 +484,13 @@ export function VideoPlayer({ url, service, roomId, userId }: VideoPlayerProps) 
       />
 
       {/* Sync Indicator */}
-      <div className="absolute top-4 right-4 bg-green-500/90 text-white px-3 py-1 rounded-full text-xs font-medium flex items-center gap-2">
-        <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
-        Synced
-      </div>
+      <div className={`absolute top-4 right-4 px-3 py-1 rounded-full text-xs font-medium flex items-center gap-2 pointer-events-none ${
+  syncStatus === 'synced' ? 'bg-green-500/90' : 
+  syncStatus === 'syncing' ? 'bg-yellow-500/90' : 'bg-red-500/90'
+} text-white`}>
+  <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+  {syncStatus === 'synced' ? 'Synced' : syncStatus === 'syncing' ? 'Syncing...' : 'Disconnected'}
+</div>
 
       {/* Play/Pause Overlay */}
       <div

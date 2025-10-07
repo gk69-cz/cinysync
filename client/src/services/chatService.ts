@@ -1,4 +1,5 @@
-// client/src/services/chatService.ts
+
+import { arrayUnion } from "firebase/firestore";
 import { 
   collection, 
   addDoc, 
@@ -13,6 +14,7 @@ import {
   increment
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { requireAuth, verifyUserId } from "@/lib/auth";
 
 export interface ChatMessage {
   id: string;
@@ -38,8 +40,14 @@ export interface ChatMessageInput {
  */
 export async function sendMessage(messageData: ChatMessageInput): Promise<string> {
   try {
-    const messagesRef = collection(db, "rooms", messageData.roomId, "messages");
-    
+     requireAuth();
+  verifyUserId(messageData.userId);
+      const messagesRef = collection(db, "rooms", messageData.roomId, "messages");
+    const roomRef = doc(db, "rooms", messageData.roomId);
+
+     await updateDoc(roomRef, {
+      participants: arrayUnion(messageData.userId)
+    });
     const docRef = await addDoc(messagesRef, {
       userId: messageData.userId,
       userName: messageData.userName,
@@ -48,8 +56,6 @@ export async function sendMessage(messageData: ChatMessageInput): Promise<string
       timestamp: serverTimestamp(),
     });
 
-    // Update room's last message timestamp
-  const roomRef = doc(db, "rooms", messageData.roomId);
     await updateDoc(roomRef, {
       lastMessageAt: serverTimestamp(),
       messageCount: increment(1) // This atomic update requires specific permissions

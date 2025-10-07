@@ -10,8 +10,10 @@ import {
   query,
   where,
   getDocs,
+  arrayUnion,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { requireAuth, verifyUserId } from "@/lib/auth";
 
 export interface PeerConnection {
   peerId: string;
@@ -90,7 +92,13 @@ export class WebRTCService {
    * Join the room and start listening for other peers
    */
   async joinRoom() {
+     requireAuth();
+  verifyUserId(this.userId);
     // Register this user in the room
+    const roomRef = doc(db, "rooms", this.roomId);
+  await updateDoc(roomRef, {
+    participants: arrayUnion(this.userId)
+  });
     const userRef = doc(db, "rooms", this.roomId, "webrtc", this.userId);
     await setDoc(userRef, {
       userId: this.userId,

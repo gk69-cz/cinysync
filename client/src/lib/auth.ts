@@ -49,4 +49,23 @@ export async function getAuthToken(): Promise<string | null> {
     return null;
   }
 }
+export function requireAuth(): void {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    // Redirect to login
+    window.location.href = '/login';
+    throw new Error("Authentication required");
+  }
+}
+export function verifyUserId(providedUserId: string): void {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    window.location.href = '/login';
+    throw new Error("Authentication required");
+  }
+  
+  if (currentUser.uid !== providedUserId) {
+    throw new Error("User ID mismatch");
+  }
+}
 
