@@ -38,8 +38,8 @@ export class VideoUploadService {
   ): Promise<string> {
     const { onProgress, maxRetries = this.DEFAULT_MAX_RETRIES, retryDelay = this.DEFAULT_RETRY_DELAY } = options;
     
-    console.log('🚀 Starting video upload...');
-    console.log('📦 File:', { name: file.name, size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`, type: file.type });
+    // console.log('🚀 Starting video upload...');
+    // console.log('📦 File:', { name: file.name, size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`, type: file.type });
 
     // Validation
     try {
@@ -55,9 +55,9 @@ export class VideoUploadService {
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        console.log(`📤 Upload attempt ${attempt}/${maxRetries}`);
+        // console.log(`📤 Upload attempt ${attempt}/${maxRetries}`);
         const url = await this.performUpload(file, onProgress);
-        console.log('✅ Upload successful!');
+        // console.log('✅ Upload successful!');
         return url;
       } catch (error: any) {
         lastError = error;
@@ -65,13 +65,13 @@ export class VideoUploadService {
         
         // Don't retry on certain errors
         if (this.isNonRetryableError(error)) {
-          console.log('⚠️ Non-retryable error, stopping attempts');
+          // console.log('⚠️ Non-retryable error, stopping attempts');
           throw error;
         }
         
         if (attempt < maxRetries) {
           const delay = retryDelay * attempt; // Exponential backoff
-          console.log(`⏳ Waiting ${delay}ms before retry...`);
+          // console.log(`⏳ Waiting ${delay}ms before retry...`);
           await this.sleep(delay);
         }
       }
@@ -92,8 +92,8 @@ export class VideoUploadService {
     
     const uploadUrl = `https://api.cloudinary.com/v1_1/${this.CLOUDINARY_CLOUD_NAME}/video/upload`;
     
-    console.log('📡 Upload URL:', uploadUrl);
-    console.log('📋 Upload preset:', this.CLOUDINARY_UPLOAD_PRESET);
+    // console.log('📡 Upload URL:', uploadUrl);
+    // console.log('📋 Upload preset:', this.CLOUDINARY_UPLOAD_PRESET);
     VideoUploadService.debugConfig();
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -106,20 +106,20 @@ export class VideoUploadService {
             totalBytes: event.total,
             progress: (event.loaded / event.total) * 100
           };
-          console.log(`📊 Progress: ${progress.progress.toFixed(1)}%`);
+          // console.log(`📊 Progress: ${progress.progress.toFixed(1)}%`);
           onProgress(progress);
         }
       });
 
       // Success
       xhr.addEventListener('load', () => {
-        console.log('📬 Response:', xhr.status, xhr.statusText);
+        // console.log('📬 Response:', xhr.status, xhr.statusText);
         
         if (xhr.status === 200) {
           try {
             const response = JSON.parse(xhr.responseText);
-            console.log('✅ Upload complete:', response.secure_url);
-            console.log('📊 Response details:', {
+            // console.log('✅ Upload complete:', response.secure_url);
+            // console.log('📊 Response details:', {
               publicId: response.public_id,
               format: response.format,
               duration: response.duration,
@@ -181,12 +181,12 @@ export class VideoUploadService {
 
     if (errors.length > 0) {
       console.error('❌ Configuration errors:', errors);
-      console.log('\n💡 Setup Instructions:');
-      console.log('1. Create .env file in project root');
-      console.log('2. Add these lines:');
-      console.log('   VITE_CLOUDINARY_CLOUD_NAME=your_cloud_name');
-      console.log('   VITE_CLOUDINARY_UPLOAD_PRESET=your_preset_name');
-      console.log('3. Restart dev server: npm run dev\n');
+      // console.log('\n💡 Setup Instructions:');
+      // console.log('1. Create .env file in project root');
+      // console.log('2. Add these lines:');
+      // console.log('   VITE_CLOUDINARY_CLOUD_NAME=your_cloud_name');
+      // console.log('   VITE_CLOUDINARY_UPLOAD_PRESET=your_preset_name');
+      // console.log('3. Restart dev server: npm run dev\n');
       
       throw this.createError(
         `Cloudinary configuration missing:\n${errors.join('\n')}`,
@@ -194,7 +194,7 @@ export class VideoUploadService {
       );
     }
 
-    console.log('✅ Configuration validated');
+    // console.log('✅ Configuration validated');
   }
 
   /**
@@ -231,7 +231,7 @@ export class VideoUploadService {
       // Don't throw, just warn - Cloudinary might still support it
     }
 
-    console.log('✅ File validated');
+    // console.log('✅ File validated');
   }
 
   /**
@@ -397,7 +397,7 @@ export class VideoUploadService {
    * Delete a video (requires backend implementation)
    */
   static async deleteVideo(videoUrl: string): Promise<void> {
-    console.log('🗑️ Delete video request:', videoUrl);
+    // console.log('🗑️ Delete video request:', videoUrl);
     
     const publicId = this.extractPublicId(videoUrl);
     
@@ -405,9 +405,9 @@ export class VideoUploadService {
       throw this.createError('Invalid Cloudinary URL', 'INVALID_URL');
     }
 
-    console.log('🔍 Public ID:', publicId);
+    // console.log('🔍 Public ID:', publicId);
     console.warn('⚠️ Video deletion requires backend implementation');
-    console.log('💡 Implement: POST /api/videos/delete with body: { publicId }');
+    // console.log('💡 Implement: POST /api/videos/delete with body: { publicId }');
     
     // TODO: Call your backend API
     throw this.createError(
@@ -501,31 +501,31 @@ export class VideoUploadService {
    * Debug configuration
    */
   static debugConfig(): void {
-    console.log('\n🔧 Cloudinary Configuration Debug');
-    console.log('================================');
-    console.log('Cloud Name:', this.CLOUDINARY_CLOUD_NAME || '❌ NOT SET');
-    console.log('Upload Preset:', this.CLOUDINARY_UPLOAD_PRESET || '❌ NOT SET');
-    console.log('\nEnvironment Variables:');
-    console.log('  VITE_CLOUDINARY_CLOUD_NAME:', this.CLOUDINARY_CLOUD_NAME ? '✅' : '❌');
-    console.log('  VITE_CLOUDINARY_UPLOAD_PRESET:', this.CLOUDINARY_UPLOAD_PRESET ? '✅' : '❌');
+    // console.log('\n🔧 Cloudinary Configuration Debug');
+    // console.log('================================');
+    // console.log('Cloud Name:', this.CLOUDINARY_CLOUD_NAME || '❌ NOT SET');
+    // console.log('Upload Preset:', this.CLOUDINARY_UPLOAD_PRESET || '❌ NOT SET');
+    // console.log('\nEnvironment Variables:');
+    // console.log('  VITE_CLOUDINARY_CLOUD_NAME:', this.CLOUDINARY_CLOUD_NAME ? '✅' : '❌');
+    // console.log('  VITE_CLOUDINARY_UPLOAD_PRESET:', this.CLOUDINARY_UPLOAD_PRESET ? '✅' : '❌');
     
     if (!this.CLOUDINARY_CLOUD_NAME || !this.CLOUDINARY_UPLOAD_PRESET) {
-      console.log('\n❌ Configuration incomplete!\n');
-      console.log('To fix:');
-      console.log('1. Create .env file in project root');
-      console.log('2. Add:');
-      console.log('   VITE_CLOUDINARY_CLOUD_NAME=your_cloud_name');
-      console.log('   VITE_CLOUDINARY_UPLOAD_PRESET=your_preset_name');
-      console.log('3. Restart: npm run dev\n');
+      // console.log('\n❌ Configuration incomplete!\n');
+      // console.log('To fix:');
+      // console.log('1. Create .env file in project root');
+      // console.log('2. Add:');
+      // console.log('   VITE_CLOUDINARY_CLOUD_NAME=your_cloud_name');
+      // console.log('   VITE_CLOUDINARY_UPLOAD_PRESET=your_preset_name');
+      // console.log('3. Restart: npm run dev\n');
     } else {
-      console.log('\n✅ Configuration looks good!\n');
+      // console.log('\n✅ Configuration looks good!\n');
     }
-    console.log('================================\n');
+    // console.log('================================\n');
   }
 }
 
 // Auto-debug in development
 if (import.meta.env.DEV) {
-  console.log('📦 VideoUploadService loaded');
+  // console.log('📦 VideoUploadService loaded');
 
 }

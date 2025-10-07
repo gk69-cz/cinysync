@@ -78,7 +78,7 @@ useEffect(() => {
       );
 
       if (shouldSync) {
-        console.log('Correcting drift...');
+        // console.log('Correcting drift...');
         // Calculate time with latency compensation
         const timeSinceUpdate = (Date.now() - remoteState.timestamp) / 1000;
         const predictedTime = remoteState.currentTime + (remoteState.isPlaying ? timeSinceUpdate : 0);

@@ -50,9 +50,9 @@ export async function createRoom(
       createdAt: serverTimestamp(),
     };
 
-    console.log("Creating room with data:", roomDoc);
+    // console.log("Creating room with data:", roomDoc);
     const docRef = await addDoc(collection(db, ROOMS_COLLECTION), roomDoc);
-    console.log("Room created with ID:", docRef.id, "and code:", roomCode);
+    // console.log("Room created with ID:", docRef.id, "and code:", roomCode);
 
     return {
       roomId: docRef.id,

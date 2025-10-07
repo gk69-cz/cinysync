@@ -169,14 +169,14 @@ export default function Dashboard() {
       return;
     }
 
-    console.log("Attempting to join room with code:", trimmedCode);
+    // console.log("Attempting to join room with code:", trimmedCode);
     setIsJoining(true);
 
     try {
       const room = await getRoomByCode(trimmedCode);
 
       if (!room) {
-        console.log("Room not found for code:", trimmedCode);
+        // console.log("Room not found for code:", trimmedCode);
         toast({
           title: "Room not found",
           description: "Please check the code and try again",
@@ -185,10 +185,10 @@ export default function Dashboard() {
         return;
       }
 
-      console.log("Room found:", room);
+      // console.log("Room found:", room);
 
       if (room.isPrivate && !room.participants.includes(currentUser!.uid)) {
-        console.log("User not authorized for private room");
+        // console.log("User not authorized for private room");
         toast({
           title: "Private room",
           description: "You need an invitation to join this room",
@@ -197,7 +197,7 @@ export default function Dashboard() {
         return;
       }
 
-      console.log("Navigating to room:", room.id);
+      // console.log("Navigating to room:", room.id);
       setLocation(`/room/${room.id}`);
     } catch (error) {
       console.error("Error joining room:", error);

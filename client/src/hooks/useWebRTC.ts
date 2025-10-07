@@ -34,13 +34,23 @@ export class  useWebRTC {
   }
 
   // 🔹 Initialize local media
-  async initializeLocalStream(enableAudio = true, enableVideo = true) {
-    this.localStream = await navigator.mediaDevices.getUserMedia({
-      audio: enableAudio,
-      video: enableVideo,
+  async initializeLocalStream(audio = true, video = true) {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: audio ? { echoCancellation: true, noiseSuppression: true } : false,
+      video: video ? { width: 640, height: 480, facingMode: "user" } : false,
     });
-    return this.localStream;
+    this.localStream = stream;
+    return stream;
+  } catch (err: any) {
+    if (err.name === "NotAllowedError") {
+      alert("Please allow access to your camera and microphone.");
+    }
+    console.error("Error accessing media devices:", err);
+    throw err;
   }
+}
+
 
   // 🔹 Join Firestore-based signaling room
  
