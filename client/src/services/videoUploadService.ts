@@ -119,7 +119,7 @@ export class VideoUploadService {
           try {
             const response = JSON.parse(xhr.responseText);
             // console.log('✅ Upload complete:', response.secure_url);
-            // console.log('📊 Response details:', {
+             console.log('📊 Response details:', {
               publicId: response.public_id,
               format: response.format,
               duration: response.duration,
