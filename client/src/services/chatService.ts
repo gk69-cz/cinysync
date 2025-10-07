@@ -49,10 +49,10 @@ export async function sendMessage(messageData: ChatMessageInput): Promise<string
     });
 
     // Update room's last message timestamp
-    const roomRef = doc(db, "rooms", messageData.roomId);
+  const roomRef = doc(db, "rooms", messageData.roomId);
     await updateDoc(roomRef, {
       lastMessageAt: serverTimestamp(),
-      messageCount: increment(1)
+      messageCount: increment(1) // This atomic update requires specific permissions
     });
 
     return docRef.id;

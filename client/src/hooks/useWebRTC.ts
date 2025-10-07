@@ -43,7 +43,14 @@ export class  useWebRTC {
   }
 
   // 🔹 Join Firestore-based signaling room
+ 
   async joinRoom() {
+     const userRef = doc(db, "rooms", this.roomId, "webrtc", this.userId);
+await setDoc(userRef, {
+  userId: this.userId,
+  joined: true,
+  timestamp: new Date(),
+});
     const roomRef = doc(db, "rooms", this.roomId);
     const candidatesRef = collection(roomRef, "candidates");
 
