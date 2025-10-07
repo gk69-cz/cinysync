@@ -71,12 +71,14 @@ export function CreateRoomDialog() {
     setUploadProgress(0);
 
     try {
-      const downloadUrl = await VideoUploadService.uploadVideo(
-        selectedFile,
-        (progress) => {
-          setUploadProgress(Math.round(progress.progress));
-        }
-      );
+     const downloadUrl = await VideoUploadService.uploadVideo(selectedFile, {
+    onProgress: (progress) => {
+      console.log(`${progress.progress.toFixed(1)}%`);
+    },
+    maxRetries: 3,
+    retryDelay: 2000
+  });
+  console.log('Video URL:', downloadUrl);
 
       toast({
         title: "Upload complete!",

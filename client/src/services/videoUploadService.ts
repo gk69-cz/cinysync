@@ -1,79 +1,115 @@
 // client/src/services/videoUploadService.ts
+
 export interface UploadProgress {
   bytesTransferred: number;
   totalBytes: number;
   progress: number;
 }
 
+export interface CloudinaryError {
+  message: string;
+  code?: string;
+  statusCode?: number;
+  details?: any;
+}
+
+export interface UploadOptions {
+  onProgress?: (progress: UploadProgress) => void;
+  maxRetries?: number;
+  retryDelay?: number;
+}
+
 export class VideoUploadService {
   private static CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
   private static CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+  
+  // Constants
+  private static readonly MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
+  private static readonly TIMEOUT = 600000; // 10 minutes
+  private static readonly DEFAULT_MAX_RETRIES = 3;
+  private static readonly DEFAULT_RETRY_DELAY = 2000; // 2 seconds
 
   /**
-   * Upload a video file to Cloudinary
-   * @param file - The video file to upload
-   * @param onProgress - Callback for upload progress updates
-   * @returns Promise with the video URL
+   * Upload a video file to Cloudinary with comprehensive error handling
    */
   static async uploadVideo(
     file: File,
+    options: UploadOptions = {}
+  ): Promise<string> {
+    const { onProgress, maxRetries = this.DEFAULT_MAX_RETRIES, retryDelay = this.DEFAULT_RETRY_DELAY } = options;
+    
+    console.log('🚀 Starting video upload...');
+    console.log('📦 File:', { name: file.name, size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`, type: file.type });
+
+    // Validation
+    try {
+      this.validateConfiguration();
+      this.validateFile(file);
+    } catch (error: any) {
+      console.error('❌ Validation failed:', error.message);
+      throw error;
+    }
+
+    // Upload with retry logic
+    let lastError: Error | null = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`📤 Upload attempt ${attempt}/${maxRetries}`);
+        const url = await this.performUpload(file, onProgress);
+        console.log('✅ Upload successful!');
+        return url;
+      } catch (error: any) {
+        lastError = error;
+        console.error(`❌ Attempt ${attempt} failed:`, error.message);
+        
+        // Don't retry on certain errors
+        if (this.isNonRetryableError(error)) {
+          console.log('⚠️ Non-retryable error, stopping attempts');
+          throw error;
+        }
+        
+        // Wait before retry (except on last attempt)
+        if (attempt < maxRetries) {
+          const delay = retryDelay * attempt; // Exponential backoff
+          console.log(`⏳ Waiting ${delay}ms before retry...`);
+          await this.sleep(delay);
+        }
+      }
+    }
+
+    // All retries failed
+    console.error('❌ All upload attempts failed');
+    throw new Error(`Upload failed after ${maxRetries} attempts: ${lastError?.message}`);
+  }
+
+  /**
+   * Perform the actual upload
+   */
+  private static performUpload(
+    file: File,
     onProgress?: (progress: UploadProgress) => void
   ): Promise<string> {
-    console.log('🚀 Starting video upload...');
-    
-    // Validate file
-    if (!file.type.startsWith('video/')) {
-      console.error('❌ Invalid file type:', file.type);
-      throw new Error('Please select a valid video file');
-    }
-
-    // Check file size (max 500MB for better UX)
-    const maxSize = 500 * 1024 * 1024; // 500MB
-    if (file.size > maxSize) {
-      console.error('❌ File too large:', (file.size / (1024 * 1024)).toFixed(2), 'MB');
-      throw new Error('Video file must be less than 500MB');
-    }
-
-    // Validate Cloudinary configuration
-    console.log('🔧 Checking Cloudinary configuration...');
-    console.log('Cloud Name:', this.CLOUDINARY_CLOUD_NAME);
-    console.log('Upload Preset:', this.CLOUDINARY_UPLOAD_PRESET);
-    
-    if (!this.CLOUDINARY_CLOUD_NAME || !this.CLOUDINARY_UPLOAD_PRESET) {
-      console.error('❌ Missing configuration:', {
-        cloudName: this.CLOUDINARY_CLOUD_NAME ? '✓' : '✗',
-        uploadPreset: this.CLOUDINARY_UPLOAD_PRESET ? '✓' : '✗'
-      });
-      throw new Error('Cloudinary configuration missing. Please check environment variables:\nVITE_CLOUDINARY_CLOUD_NAME\nVITE_CLOUDINARY_UPLOAD_PRESET');
-    }
-
-    console.log('✓ Configuration OK');
-    console.log('📦 File details:', {
-      name: file.name,
-      type: file.type,
-      size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`
-    });
-
-    // Create form data
     const formData = new FormData();
     formData.append('file', file);
     formData.append('upload_preset', this.CLOUDINARY_UPLOAD_PRESET);
+    formData.append('resource_type', 'video'); // CRITICAL: Must specify video
     
-    // Don't add folder or resource_type - let the upload preset handle it
-    // This is important for unsigned uploads
-
-    // Upload URL - using /auto/upload for automatic resource detection
-    const uploadUrl = `https://api.cloudinary.com/v1_1/${this.CLOUDINARY_CLOUD_NAME}/auto/upload`;
+    // Optional: Add folder organization
+    // formData.append('folder', 'watch-party-videos');
     
-    console.log('📤 Upload URL:', uploadUrl);
-    console.log('📋 FormData contents:');
-    console.log('  - file:', file.name);
-    console.log('  - upload_preset:', this.CLOUDINARY_UPLOAD_PRESET);
+    // Optional: Add tags for organization
+    // formData.append('tags', 'watch-party,user-upload');
+    
+    const uploadUrl = `https://api.cloudinary.com/v1_1/${this.CLOUDINARY_CLOUD_NAME}/video/upload`;
+    
+    console.log('📡 Upload URL:', uploadUrl);
+    console.log('📋 Upload preset:', this.CLOUDINARY_UPLOAD_PRESET);
 
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
 
-      // Track upload progress
+      // Progress tracking
       xhr.upload.addEventListener('progress', (event) => {
         if (event.lengthComputable && onProgress) {
           const progress = {
@@ -81,135 +117,322 @@ export class VideoUploadService {
             totalBytes: event.total,
             progress: (event.loaded / event.total) * 100
           };
-          console.log(`📊 Upload progress: ${progress.progress.toFixed(1)}%`);
+          console.log(`📊 Progress: ${progress.progress.toFixed(1)}%`);
           onProgress(progress);
         }
       });
 
-      // Handle completion
+      // Success
       xhr.addEventListener('load', () => {
-        console.log('📬 Response received:', {
-          status: xhr.status,
-          statusText: xhr.statusText
-        });
-
+        console.log('📬 Response:', xhr.status, xhr.statusText);
+        
         if (xhr.status === 200) {
           try {
             const response = JSON.parse(xhr.responseText);
-            console.log('✅ Upload successful!');
-            console.log('🔗 Video URL:', response.secure_url);
-            console.log('📝 Full response:', response);
-            
-            // Return the secure URL (uses HTTPS and CDN)
+            console.log('✅ Upload complete:', response.secure_url);
+            console.log('📊 Response details:', {
+              publicId: response.public_id,
+              format: response.format,
+              duration: response.duration,
+              bytes: response.bytes
+            });
             resolve(response.secure_url);
           } catch (error) {
             console.error('❌ Failed to parse response:', xhr.responseText);
-            reject(new Error('Failed to parse upload response'));
+            reject(this.createError('Failed to parse upload response', 'PARSE_ERROR', xhr.status));
           }
         } else {
-          console.error('❌ Upload failed with status:', xhr.status);
-          console.error('Response:', xhr.responseText);
-          
-          let errorMessage = `Upload failed with status: ${xhr.status}`;
-          let detailedError = '';
-          
-          try {
-            const errorData = JSON.parse(xhr.responseText);
-            console.error('Error details:', errorData);
-            
-            if (errorData.error && errorData.error.message) {
-              errorMessage = errorData.error.message;
-              detailedError = errorData.error.message;
-            }
-          } catch (e) {
-            detailedError = xhr.responseText;
-          }
-
-          // Provide helpful error messages based on status code
-          if (xhr.status === 401) {
-            console.error('🔒 401 Unauthorized - Upload preset configuration issue');
-            errorMessage = 'Upload preset not authorized. Please check:\n' +
-                          '1. Upload preset exists in Cloudinary\n' +
-                          '2. Upload preset is set to "Unsigned" mode\n' +
-                          '3. Preset name matches exactly: ' + this.CLOUDINARY_UPLOAD_PRESET;
-          } else if (xhr.status === 400) {
-            console.error('⚠️ 400 Bad Request - Invalid request');
-            errorMessage = 'Invalid upload request: ' + detailedError;
-          } else if (xhr.status === 403) {
-            console.error('🚫 403 Forbidden - Access denied');
-            errorMessage = 'Access denied. Check your upload preset permissions.';
-          }
-          
-          reject(new Error(errorMessage));
+          reject(this.handleHttpError(xhr));
         }
       });
 
-      // Handle errors
+      // Network error
       xhr.addEventListener('error', () => {
-        console.error('❌ Network error during upload');
-        reject(new Error('Network error during upload. Check your internet connection.'));
+        console.error('❌ Network error');
+        reject(this.createError(
+          'Network error. Check your internet connection.',
+          'NETWORK_ERROR'
+        ));
       });
 
+      // Upload cancelled
       xhr.addEventListener('abort', () => {
         console.warn('⚠️ Upload cancelled');
-        reject(new Error('Upload cancelled'));
+        reject(this.createError('Upload was cancelled', 'CANCELLED'));
       });
 
+      // Timeout
       xhr.addEventListener('timeout', () => {
         console.error('⏱️ Upload timeout');
-        reject(new Error('Upload timeout. File might be too large or connection is slow.'));
+        reject(this.createError(
+          `Upload timeout after ${this.TIMEOUT / 1000}s. File may be too large or connection is slow.`,
+          'TIMEOUT'
+        ));
       });
 
-      // Set timeout (10 minutes for large files)
-      xhr.timeout = 600000;
-
-      // Send request
-      console.log('🚀 Sending upload request...');
+      xhr.timeout = this.TIMEOUT;
       xhr.open('POST', uploadUrl);
       xhr.send(formData);
     });
   }
 
   /**
-   * Delete a video from Cloudinary
-   * @param videoUrl - The URL of the video to delete
-   * Note: Deletion requires server-side implementation with Cloudinary API
+   * Validate Cloudinary configuration
+   */
+  private static validateConfiguration(): void {
+    const errors: string[] = [];
+
+    if (!this.CLOUDINARY_CLOUD_NAME) {
+      errors.push('VITE_CLOUDINARY_CLOUD_NAME is not set');
+    }
+
+    if (!this.CLOUDINARY_UPLOAD_PRESET) {
+      errors.push('VITE_CLOUDINARY_UPLOAD_PRESET is not set');
+    }
+
+    if (errors.length > 0) {
+      console.error('❌ Configuration errors:', errors);
+      console.log('\n💡 Setup Instructions:');
+      console.log('1. Create .env file in project root');
+      console.log('2. Add these lines:');
+      console.log('   VITE_CLOUDINARY_CLOUD_NAME=your_cloud_name');
+      console.log('   VITE_CLOUDINARY_UPLOAD_PRESET=your_preset_name');
+      console.log('3. Restart dev server: npm run dev\n');
+      
+      throw this.createError(
+        `Cloudinary configuration missing:\n${errors.join('\n')}`,
+        'CONFIG_ERROR'
+      );
+    }
+
+    console.log('✅ Configuration validated');
+  }
+
+  /**
+   * Validate video file
+   */
+  private static validateFile(file: File): void {
+    // Check if it's a video
+    if (!file.type.startsWith('video/')) {
+      throw this.createError(
+        `Invalid file type: ${file.type}. Please select a video file.`,
+        'INVALID_FILE_TYPE'
+      );
+    }
+
+    // Check file size
+    if (file.size > this.MAX_FILE_SIZE) {
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+      const maxSizeMB = (this.MAX_FILE_SIZE / (1024 * 1024)).toFixed(0);
+      throw this.createError(
+        `File is too large (${sizeMB}MB). Maximum size is ${maxSizeMB}MB.`,
+        'FILE_TOO_LARGE'
+      );
+    }
+
+    // Check if file is empty
+    if (file.size === 0) {
+      throw this.createError('File is empty', 'EMPTY_FILE');
+    }
+
+    // Validate supported formats
+    const supportedFormats = ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime', 'video/x-msvideo'];
+    if (!supportedFormats.includes(file.type)) {
+      console.warn('⚠️ Unusual video format:', file.type);
+      // Don't throw, just warn - Cloudinary might still support it
+    }
+
+    console.log('✅ File validated');
+  }
+
+  /**
+   * Handle HTTP errors with detailed messages
+   */
+  private static handleHttpError(xhr: XMLHttpRequest): Error {
+    console.error('❌ HTTP Error:', xhr.status, xhr.statusText);
+    console.error('Response:', xhr.responseText);
+
+    let errorMessage = `Upload failed with status ${xhr.status}`;
+    let errorCode = 'HTTP_ERROR';
+    let details: any = {};
+
+    // Try to parse error response
+    try {
+      const errorData = JSON.parse(xhr.responseText);
+      details = errorData;
+      
+      if (errorData.error?.message) {
+        errorMessage = errorData.error.message;
+      }
+    } catch (e) {
+      // Response is not JSON
+      if (xhr.responseText) {
+        details.rawResponse = xhr.responseText;
+      }
+    }
+
+    // Provide specific error messages based on status code
+    switch (xhr.status) {
+      case 400:
+        errorCode = 'BAD_REQUEST';
+        errorMessage = this.getError400Message(details);
+        break;
+      
+      case 401:
+        errorCode = 'UNAUTHORIZED';
+        errorMessage = 
+          '🔒 Upload preset not authorized. Please check:\n' +
+          '1. Upload preset exists in Cloudinary dashboard\n' +
+          '2. Preset is set to "Unsigned" mode\n' +
+          '3. Preset name matches exactly: ' + this.CLOUDINARY_UPLOAD_PRESET + '\n' +
+          '4. Cloud name is correct: ' + this.CLOUDINARY_CLOUD_NAME;
+        break;
+      
+      case 403:
+        errorCode = 'FORBIDDEN';
+        errorMessage = 
+          '🚫 Access denied. Possible reasons:\n' +
+          '1. Upload preset doesn\'t allow this file type\n' +
+          '2. File size exceeds preset limits\n' +
+          '3. Account storage/bandwidth limit reached\n' +
+          '4. IP/domain restrictions in preset settings';
+        break;
+      
+      case 404:
+        errorCode = 'NOT_FOUND';
+        errorMessage = 
+          '❓ Resource not found. Please check:\n' +
+          '1. Cloud name is correct: ' + this.CLOUDINARY_CLOUD_NAME + '\n' +
+          '2. Upload preset exists: ' + this.CLOUDINARY_UPLOAD_PRESET;
+        break;
+      
+      case 413:
+        errorCode = 'FILE_TOO_LARGE';
+        errorMessage = '📦 File is too large for Cloudinary. Maximum size varies by plan.';
+        break;
+      
+      case 420:
+        errorCode = 'RATE_LIMITED';
+        errorMessage = '⏱️ Rate limit exceeded. Please wait a moment and try again.';
+        break;
+      
+      case 500:
+      case 502:
+      case 503:
+        errorCode = 'SERVER_ERROR';
+        errorMessage = '🔧 Cloudinary server error. This is usually temporary - please try again.';
+        break;
+      
+      case 504:
+        errorCode = 'GATEWAY_TIMEOUT';
+        errorMessage = '⏱️ Upload timeout. File may be too large or connection is slow.';
+        break;
+    }
+
+    return this.createError(errorMessage, errorCode, xhr.status, details);
+  }
+
+  /**
+   * Get specific error message for 400 Bad Request
+   */
+  private static getError400Message(details: any): string {
+    const errorMsg = details?.error?.message?.toLowerCase() || '';
+    
+    if (errorMsg.includes('resource_type')) {
+      return '❌ Invalid resource type. Video files must use resource_type="video"';
+    }
+    
+    if (errorMsg.includes('upload_preset')) {
+      return '❌ Invalid upload preset. Check preset name: ' + this.CLOUDINARY_UPLOAD_PRESET;
+    }
+    
+    if (errorMsg.includes('signature')) {
+      return '❌ Invalid signature. For unsigned uploads, ensure preset is set to "Unsigned"';
+    }
+    
+    if (errorMsg.includes('format')) {
+      return '❌ Unsupported video format. Try MP4, WebM, or MOV';
+    }
+    
+    if (errorMsg.includes('transformation')) {
+      return '❌ Invalid transformation parameters';
+    }
+    
+    return `❌ Bad request: ${details?.error?.message || 'Unknown error'}`;
+  }
+
+  /**
+   * Create a structured error
+   */
+  private static createError(
+    message: string,
+    code: string,
+    statusCode?: number,
+    details?: any
+  ): Error {
+    const error = new Error(message) as Error & CloudinaryError;
+    error.code = code;
+    error.statusCode = statusCode;
+    error.details = details;
+    return error;
+  }
+
+  /**
+   * Check if error is non-retryable
+   */
+  private static isNonRetryableError(error: any): boolean {
+    const nonRetryableCodes = [
+      'CONFIG_ERROR',
+      'INVALID_FILE_TYPE',
+      'FILE_TOO_LARGE',
+      'EMPTY_FILE',
+      'UNAUTHORIZED',
+      'FORBIDDEN',
+      'NOT_FOUND',
+      'BAD_REQUEST',
+      'PARSE_ERROR'
+    ];
+    
+    return nonRetryableCodes.includes(error.code) || 
+           (error.statusCode && error.statusCode >= 400 && error.statusCode < 500);
+  }
+
+  /**
+   * Sleep utility for retry delays
+   */
+  private static sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Delete a video (requires backend implementation)
    */
   static async deleteVideo(videoUrl: string): Promise<void> {
     console.log('🗑️ Delete video request:', videoUrl);
     
-    // Extract public_id from Cloudinary URL
     const publicId = this.extractPublicId(videoUrl);
     
     if (!publicId) {
-      console.error('❌ Invalid Cloudinary URL');
-      throw new Error('Invalid Cloudinary URL');
+      throw this.createError('Invalid Cloudinary URL', 'INVALID_URL');
     }
 
-    console.log('📝 Public ID:', publicId);
+    console.log('🔍 Public ID:', publicId);
+    console.warn('⚠️ Video deletion requires backend implementation');
+    console.log('💡 Implement: POST /api/videos/delete with body: { publicId }');
     
-    // Note: Direct deletion from client is not recommended for security
-    // This should be implemented on your backend using Cloudinary Admin API
-    console.warn('⚠️ Video deletion should be handled by backend API');
-    console.log('💡 Implement server endpoint: DELETE /api/videos/:publicId');
-    
-    // You would typically call your backend API here:
-    // await fetch('/api/videos/delete', {
-    //   method: 'DELETE',
-    //   headers: { 'Content-Type': 'application/json' },
-    //   body: JSON.stringify({ publicId })
-    // });
+    // TODO: Call your backend API
+    throw this.createError(
+      'Video deletion must be implemented on the backend for security',
+      'NOT_IMPLEMENTED'
+    );
   }
 
   /**
    * Extract public_id from Cloudinary URL
-   * @param url - Cloudinary URL
-   * @returns public_id or null
    */
   private static extractPublicId(url: string): string | null {
     try {
-      // Example URL: https://res.cloudinary.com/demo/video/upload/v1234567890/folder/filename.mp4
-      const match = url.match(/\/upload\/(?:v\d+\/)?(.+?)(?:\.[^.]+)?$/);
+      const match = url.match(/\/v\d+\/(.+?)(?:\.[^.]+)?$/);
       return match ? match[1] : null;
     } catch (error) {
       console.error('Error extracting public_id:', error);
@@ -218,148 +441,102 @@ export class VideoUploadService {
   }
 
   /**
-   * Validate video URL format
-   * @param url - URL to validate
-   * @returns true if valid Cloudinary URL
+   * Validate if URL is from Cloudinary
    */
   static isCloudinaryUrl(url: string): boolean {
-    const isValid = url.includes('res.cloudinary.com') || url.includes('cloudinary.com');
-    console.log('🔍 URL validation:', url, '→', isValid ? '✓' : '✗');
-    return isValid;
+    return url.includes('res.cloudinary.com') || url.includes('cloudinary.com');
   }
 
   /**
    * Get optimized video URL with transformations
-   * @param url - Original Cloudinary URL
-   * @param options - Transformation options
-   * @returns Optimized URL
    */
   static getOptimizedUrl(
     url: string,
-    options?: {
+    options: {
       quality?: 'auto' | number;
       format?: 'auto' | 'mp4' | 'webm';
       width?: number;
       height?: number;
-    }
+    } = {}
   ): string {
     if (!this.isCloudinaryUrl(url)) {
-      console.log('⚠️ Not a Cloudinary URL, skipping optimization');
+      console.warn('⚠️ Not a Cloudinary URL, cannot optimize');
       return url;
     }
 
     const transformations: string[] = [];
 
-    if (options?.quality) {
-      transformations.push(`q_${options.quality}`);
-    }
+    if (options.quality) transformations.push(`q_${options.quality}`);
+    if (options.format) transformations.push(`f_${options.format}`);
+    if (options.width) transformations.push(`w_${options.width}`);
+    if (options.height) transformations.push(`h_${options.height}`);
 
-    if (options?.format) {
-      transformations.push(`f_${options.format}`);
-    }
-
-    if (options?.width) {
-      transformations.push(`w_${options.width}`);
-    }
-
-    if (options?.height) {
-      transformations.push(`h_${options.height}`);
-    }
-
-    // Insert transformations into URL
     if (transformations.length > 0) {
       const transformation = transformations.join(',');
-      const optimizedUrl = url.replace('/upload/', `/upload/${transformation}/`);
-      console.log('🎨 Optimized URL:', optimizedUrl);
-      return optimizedUrl;
+      return url.replace('/upload/', `/upload/${transformation}/`);
     }
 
     return url;
   }
 
   /**
-   * Generate video thumbnail URL
-   * @param videoUrl - Cloudinary video URL
-   * @param options - Thumbnail options
-   * @returns Thumbnail image URL
+   * Generate video thumbnail
    */
   static getThumbnailUrl(
     videoUrl: string,
-    options?: {
+    options: {
       width?: number;
       height?: number;
-      time?: number; // seconds into video
-    }
+      time?: number;
+    } = {}
   ): string {
     if (!this.isCloudinaryUrl(videoUrl)) {
-      console.warn('⚠️ Cannot generate thumbnail for non-Cloudinary URL');
-      return '';
+      throw this.createError('Cannot generate thumbnail for non-Cloudinary URL', 'INVALID_URL');
     }
 
     const transformations: string[] = [];
     
-    if (options?.width) transformations.push(`w_${options.width}`);
-    if (options?.height) transformations.push(`h_${options.height}`);
-    if (options?.time) transformations.push(`so_${options.time}`);
-    
-    transformations.push('f_jpg'); // Convert to image format
+    if (options.width) transformations.push(`w_${options.width}`);
+    if (options.height) transformations.push(`h_${options.height}`);
+    if (options.time) transformations.push(`so_${options.time}`);
+    transformations.push('f_jpg');
 
     const transformation = transformations.join(',');
     
-    // Replace /video/upload/ with /video/upload/TRANSFORMATIONS/ and change to .jpg
-    const thumbnailUrl = videoUrl
+    return videoUrl
       .replace('/video/upload/', `/video/upload/${transformation}/`)
       .replace(/\.\w+$/, '.jpg');
-    
-    console.log('🖼️ Thumbnail URL generated:', thumbnailUrl);
-    return thumbnailUrl;
   }
 
   /**
-   * Get video file extension from URL
-   * @param url - Video URL
-   * @returns file extension or null
-   */
-  static getVideoExtension(url: string): string | null {
-    const match = url.match(/\.(mp4|webm|ogg|mov|avi|mkv)($|\?)/i);
-    const extension = match ? match[1] : null;
-    console.log('📹 Video extension:', extension || 'unknown');
-    return extension;
-  }
-
-  /**
-   * Debug helper - Print current configuration
+   * Debug configuration
    */
   static debugConfig(): void {
-    console.log('🔧 Cloudinary Configuration Debug:');
+    console.log('\n🔧 Cloudinary Configuration Debug');
     console.log('================================');
     console.log('Cloud Name:', this.CLOUDINARY_CLOUD_NAME || '❌ NOT SET');
     console.log('Upload Preset:', this.CLOUDINARY_UPLOAD_PRESET || '❌ NOT SET');
-    console.log('');
-    console.log('Environment Variables:');
-    console.log('  VITE_CLOUDINARY_CLOUD_NAME:', import.meta.env.VITE_CLOUDINARY_CLOUD_NAME ? '✓ Set' : '✗ Missing');
-    console.log('  VITE_CLOUDINARY_UPLOAD_PRESET:', import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET ? '✓ Set' : '✗ Missing');
-    console.log('');
+    console.log('\nEnvironment Variables:');
+    console.log('  VITE_CLOUDINARY_CLOUD_NAME:', this.CLOUDINARY_CLOUD_NAME ? '✅' : '❌');
+    console.log('  VITE_CLOUDINARY_UPLOAD_PRESET:', this.CLOUDINARY_UPLOAD_PRESET ? '✅' : '❌');
     
     if (!this.CLOUDINARY_CLOUD_NAME || !this.CLOUDINARY_UPLOAD_PRESET) {
-      console.error('❌ Configuration incomplete!');
-      console.log('');
+      console.log('\n❌ Configuration incomplete!\n');
       console.log('To fix:');
       console.log('1. Create .env file in project root');
-      console.log('2. Add these lines:');
+      console.log('2. Add:');
       console.log('   VITE_CLOUDINARY_CLOUD_NAME=your_cloud_name');
       console.log('   VITE_CLOUDINARY_UPLOAD_PRESET=your_preset_name');
-      console.log('3. Restart dev server: npm run dev');
+      console.log('3. Restart: npm run dev\n');
     } else {
-      console.log('✅ Configuration looks good!');
+      console.log('\n✅ Configuration looks good!\n');
     }
-    console.log('================================');
+    console.log('================================\n');
   }
 }
 
-// Auto-run debug on import in development
+// Auto-debug in development
 if (import.meta.env.DEV) {
   console.log('📦 VideoUploadService loaded');
-  // Uncomment to see config on every page load:
-  // VideoUploadService.debugConfig();
+
 }
