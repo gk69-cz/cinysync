@@ -69,7 +69,6 @@ export class VideoUploadService {
           throw error;
         }
         
-        // Wait before retry (except on last attempt)
         if (attempt < maxRetries) {
           const delay = retryDelay * attempt; // Exponential backoff
           console.log(`⏳ Waiting ${delay}ms before retry...`);
@@ -78,14 +77,10 @@ export class VideoUploadService {
       }
     }
 
-    // All retries failed
     console.error('❌ All upload attempts failed');
     throw new Error(`Upload failed after ${maxRetries} attempts: ${lastError?.message}`);
   }
 
-  /**
-   * Perform the actual upload
-   */
   private static performUpload(
     file: File,
     onProgress?: (progress: UploadProgress) => void
@@ -95,17 +90,11 @@ export class VideoUploadService {
     formData.append('upload_preset', this.CLOUDINARY_UPLOAD_PRESET);
     formData.append('resource_type', 'video'); // CRITICAL: Must specify video
     
-    // Optional: Add folder organization
-    // formData.append('folder', 'watch-party-videos');
-    
-    // Optional: Add tags for organization
-    // formData.append('tags', 'watch-party,user-upload');
-    
     const uploadUrl = `https://api.cloudinary.com/v1_1/${this.CLOUDINARY_CLOUD_NAME}/video/upload`;
     
     console.log('📡 Upload URL:', uploadUrl);
     console.log('📋 Upload preset:', this.CLOUDINARY_UPLOAD_PRESET);
-
+    VideoUploadService.debugConfig();
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
 
