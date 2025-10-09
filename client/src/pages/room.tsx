@@ -8,7 +8,7 @@ import { VideoPlayer } from "@/components/VideoPlayer";
 import { Film, Mic, MicOff, Video, VideoOff, Share2, Settings as SettingsIcon, LogOut, Copy, Phone, PhoneOff } from "lucide-react";
 import { Link, useParams, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
-import { useWebRTC } from "@/hooks/useWebRTC";
+import useWebRTC from "@/hooks/useWebRTC";
 import { getRoomById, joinRoom, leaveRoom } from "../services/roomService";
 import { Room } from "@/types/room";
 import { useToast } from "@/hooks/use-toast";
@@ -259,14 +259,21 @@ export default function RoomPage() {
         </div>
 
         {/* Sidebar */}
-        <div className="w-80 min-w-[320px] border-l border-border flex flex-col bg-card">
+        <div className="w-80 min-w-[320px] border-l border-border flex flex-col bg-card max-h-full">
+          {/* Participants Section */}
           <div className="p-4 border-b border-border shrink-0">
             <h2 className="font-semibold mb-3 flex items-center justify-between">
-              <span>Participants ({room.participants.length})</span>
-              {isConnected && <span className="text-green-500 text-sm">● Live</span>}
+              <span>Participants</span>
+              {isConnected && <span className="text-green-500 text-sm flex items-center gap-1">
+                <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                Live
+              </span>}
             </h2>
-            <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
-              {isConnected && (
+            
+            {/* Video Grid */}
+            {isConnected ? (
+              <div className="grid grid-cols-2 gap-2 max-h-[280px] overflow-y-auto">
+                {/* Local Video */}
                 <VideoTile
                   name={currentUser?.displayName || "You"}
                   avatar={currentUser?.photoURL || undefined}
@@ -274,35 +281,68 @@ export default function RoomPage() {
                   stream={localStream || undefined}
                   isLocal={true}
                 />
-              )}
 
-              {remotePeers.map((peer) => (
-                <VideoTile
-                  key={peer.peerId}
-                  name={`User ${peer.peerId.slice(0, 6)}`}
-                  isMuted={false}
-                  stream={peer.stream}
-                  isLocal={false}
-                />
-              ))}
+                {/* Remote Peers */}
+               {remotePeers.length > 0 ? (
+                  remotePeers.map((peer: { peerId: string; stream: MediaStream }) => (
+                    <VideoTile
+                      key={peer.peerId}
+                      name={`User ${peer.peerId.slice(0, 6)}`}
+                      isMuted={false}
+                      stream={peer.stream}
+                      isLocal={false}
+                    />
+                  ))
+                ): (
+                  <div className="col-span-1 flex items-center justify-center p-3 bg-muted/50 rounded-lg border-2 border-dashed border-border">
+                    <p className="text-xs text-muted-foreground text-center">
+                      Waiting for others...
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="col-span-2 text-center p-6 bg-muted/50 rounded-lg border-2 border-dashed border-border">
+                <Phone className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground font-medium mb-1">
+                  Join Video Call
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Click the green button below to start
+                </p>
+              </div>
+            )}
 
-              {!isConnected && (
-                <div className="col-span-2 text-center p-4 bg-muted rounded-lg">
-                  <Phone className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">
-                    Click the green phone button to join the video call
-                  </p>
-                </div>
-              )}
+            {/* Participant Count */}
+            <div className="mt-3 pt-3 border-t border-border">
+              <p className="text-xs text-muted-foreground">
+                {isConnected ? (
+                  <>
+                    <span className="font-semibold text-foreground">{1 + remotePeers.length}</span> in call
+                    {room.participants.length > (1 + remotePeers.length) && (
+                      <span className="ml-1">
+                        • <span className="font-semibold text-foreground">{room.participants.length - (1 + remotePeers.length)}</span> in room
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span className="font-semibold text-foreground">{room.participants.length}</span> in room
+                  </>
+                )}
+              </p>
             </div>
           </div>
 
-          <ChatContainer
-            roomId={id!}
-            currentUserId={currentUser!.uid}
-            currentUserName={currentUser?.displayName || "Anonymous"}
-            currentUserAvatar={currentUser?.photoURL || undefined}
-          />
+          {/* Chat Section */}
+          <div className="flex-1 min-h-0">
+            <ChatContainer
+              roomId={id!}
+              currentUserId={currentUser!.uid}
+              currentUserName={currentUser?.displayName || "Anonymous"}
+              currentUserAvatar={currentUser?.photoURL || undefined}
+            />
+          </div>
         </div>
       </div>
     </div>

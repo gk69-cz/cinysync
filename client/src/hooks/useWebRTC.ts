@@ -120,4 +120,5 @@ export function useWebRTC(roomId: string, userId: string) {
   };
 }
 
+export default useWebRTC;
 export { WebRTCService };
