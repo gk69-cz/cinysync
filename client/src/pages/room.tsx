@@ -22,7 +22,6 @@ export default function RoomPage() {
   const [room, setRoom] = useState<Room | null>(null);
   const [loading, setLoading] = useState(true);
 
-
   // WebRTC Hook
   const {
     connect,
@@ -51,7 +50,7 @@ export default function RoomPage() {
     loadRoom();
   }, [id, currentUser]);
 
-   const loadRoom = async () => {
+  const loadRoom = async () => {
     if (!id || !currentUser) return;
 
     try {
@@ -197,9 +196,9 @@ export default function RoomPage() {
       </header>
 
       {/* Body */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Video Area */}
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col min-w-0">
           <div className="flex-1 bg-muted/30 flex items-center justify-center p-6">
             <div className="aspect-video w-full max-w-4xl">
               <VideoPlayer
@@ -211,7 +210,6 @@ export default function RoomPage() {
             </div>
           </div>
 
-          {/* Controls */}
           {/* Controls */}
           <div className="p-4 border-t border-border bg-card/50 backdrop-blur-sm">
             <div className="flex items-center justify-center gap-3">
@@ -257,14 +255,15 @@ export default function RoomPage() {
                 <Share2 className="h-5 w-5" />
               </Button>
             </div>
+          </div>
         </div>
 
         {/* Sidebar */}
-        <div className="w-80 border-l border-border flex flex-col">
-          <div className="p-4 border-b border-border">
-            <h2 className="font-semibold mb-3">
-              Participants ({room.participants.length})
-              {isConnected && <span className="text-green-500 ml-2">● Live</span>}
+        <div className="w-80 min-w-[320px] border-l border-border flex flex-col bg-card">
+          <div className="p-4 border-b border-border shrink-0">
+            <h2 className="font-semibold mb-3 flex items-center justify-between">
+              <span>Participants ({room.participants.length})</span>
+              {isConnected && <span className="text-green-500 text-sm">● Live</span>}
             </h2>
             <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
               {isConnected && (
@@ -306,7 +305,6 @@ export default function RoomPage() {
           />
         </div>
       </div>
-    </div>
     </div>
   );
 }
