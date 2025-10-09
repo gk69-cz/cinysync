@@ -270,6 +270,17 @@ export default function RoomPage() {
               </span>}
             </h2>
             
+            {/* Debug Info */}
+            {isConnected && (
+              <div className="mb-2 p-2 bg-muted/50 rounded text-xs">
+                <div>Local Stream: {localStream ? '✅' : '❌'}</div>
+                <div>Remote Peers: {remotePeers.length}</div>
+                {remotePeers.map((p, i) => (
+                  <div key={i}>Peer {i + 1}: {p.peerId.slice(0, 8)} - Stream: {p.stream ? '✅' : '❌'}</div>
+                ))}
+              </div>
+            )}
+            
             {/* Video Grid */}
             {isConnected ? (
               <div className="grid grid-cols-2 gap-2 max-h-[280px] overflow-y-auto">
@@ -283,7 +294,7 @@ export default function RoomPage() {
                 />
 
                 {/* Remote Peers */}
-               {remotePeers.length > 0 ? (
+                {remotePeers.length > 0 ? (
                   remotePeers.map((peer: { peerId: string; stream: MediaStream }) => (
                     <VideoTile
                       key={peer.peerId}
@@ -293,7 +304,7 @@ export default function RoomPage() {
                       isLocal={false}
                     />
                   ))
-                ): (
+                ) : (
                   <div className="col-span-1 flex items-center justify-center p-3 bg-muted/50 rounded-lg border-2 border-dashed border-border">
                     <p className="text-xs text-muted-foreground text-center">
                       Waiting for others...

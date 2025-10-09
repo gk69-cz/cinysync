@@ -1,4 +1,3 @@
-// client/src/hooks/useWebRTC.ts
 import { useState, useEffect, useRef } from "react";
 import { WebRTCService, WebRTCServiceInstance} from "../services/webrtcService";
 
