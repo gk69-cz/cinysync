@@ -305,10 +305,21 @@ export default function RoomPage() {
                     />
                   ))
                 ) : (
-                  <div className="col-span-1 flex items-center justify-center p-3 bg-muted/50 rounded-lg border-2 border-dashed border-border">
-                    <p className="text-xs text-muted-foreground text-center">
+                  <div className="col-span-1 flex flex-col items-center justify-center p-3 bg-muted/50 rounded-lg border-2 border-dashed border-border">
+                    <p className="text-xs text-muted-foreground text-center mb-2">
                       Waiting for others...
                     </p>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={async () => {
+                        await disconnect();
+                        setTimeout(() => connect(), 500);
+                      }}
+                      className="h-7 text-xs"
+                    >
+                      Refresh
+                    </Button>
                   </div>
                 )}
               </div>
