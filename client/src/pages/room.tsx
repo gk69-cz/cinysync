@@ -21,6 +21,7 @@ export default function RoomPage() {
 
   const [room, setRoom] = useState<Room | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // WebRTC Hook
   const {
