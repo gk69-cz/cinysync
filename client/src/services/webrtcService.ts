@@ -1,48 +1,41 @@
-// client/src/services/webrtcService.ts
+// client/src/services/WebRTCService.ts
 import {
-  collection,
   doc,
   setDoc,
-  getDoc,
-  onSnapshot,
   updateDoc,
+  addDoc,
+  onSnapshot,
+  collection,
   deleteDoc,
-  query,
-  where,
   getDocs,
   arrayUnion,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { requireAuth, verifyUserId } from "@/lib/auth";
 
-export interface PeerConnection {
-  peerId: string;
-  peerConnection: RTCPeerConnection;
-  stream?: MediaStream;
-}
+const ICE_CONFIG: RTCConfiguration = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+  ],
+};
+
+type OnRemoteStreamCallback = (peerId: string, stream: MediaStream) => void;
+type OnPeerDisconnectedCallback = (peerId: string) => void;
 
 export class WebRTCService {
-  private localStream: MediaStream | null = null;
-  private peerConnections: Map<string, RTCPeerConnection> = new Map();
   private roomId: string;
   private userId: string;
-  private onRemoteStream?: (peerId: string, stream: MediaStream) => void;
-  private onPeerDisconnected?: (peerId: string) => void;
-
-  // ICE servers configuration (using free STUN servers)
-  private iceServers = {
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:stun1.l.google.com:19302" },
-      { urls: "stun:stun2.l.google.com:19302" },
-    ],
-  };
+  private localStream: MediaStream | null = null;
+  private peers: Map<string, RTCPeerConnection> = new Map();
+  private onRemoteStream: OnRemoteStreamCallback;
+  private onPeerDisconnected: OnPeerDisconnectedCallback;
+  private unsubscribers: (() => void)[] = [];
 
   constructor(
     roomId: string,
     userId: string,
-    onRemoteStream?: (peerId: string, stream: MediaStream) => void,
-    onPeerDisconnected?: (peerId: string) => void
+    onRemoteStream: OnRemoteStreamCallback,
+    onPeerDisconnected: OnPeerDisconnectedCallback
   ) {
     this.roomId = roomId;
     this.userId = userId;
@@ -50,319 +43,179 @@ export class WebRTCService {
     this.onPeerDisconnected = onPeerDisconnected;
   }
 
-  /**
-   * Initialize local media stream (camera and microphone)
-   */
+  // Initialize camera / mic
   async initializeLocalStream(audio = true, video = true): Promise<MediaStream> {
     try {
-      this.localStream = await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: audio ? { echoCancellation: true, noiseSuppression: true } : false,
         video: video ? { width: 640, height: 480, facingMode: "user" } : false,
       });
-      return this.localStream;
-    } catch (error) {
-      console.error("Error accessing media devices:", error);
-      throw new Error("Failed to access camera/microphone");
+      this.localStream = stream;
+      return stream;
+    } catch (err: any) {
+      if (err.name === "NotAllowedError") {
+        alert("Please allow camera and microphone access.");
+      }
+      console.error("Media device error:", err);
+      throw err;
     }
   }
 
-  /**
-   * Toggle audio track
-   */
-  toggleAudio(enabled: boolean) {
-    if (this.localStream) {
-      this.localStream.getAudioTracks().forEach((track) => {
-        track.enabled = enabled;
-      });
-    }
-  }
-
-  /**
-   * Toggle video track
-   */
-  toggleVideo(enabled: boolean) {
-    if (this.localStream) {
-      this.localStream.getVideoTracks().forEach((track) => {
-        track.enabled = enabled;
-      });
-    }
-  }
-
-  /**
-   * Join the room and start listening for other peers
-   */
+  // Join room & start listening
   async joinRoom() {
-     requireAuth();
-  verifyUserId(this.userId);
-    // Register this user in the room
-    const roomRef = doc(db, "rooms", this.roomId);
-  await updateDoc(roomRef, {
-    participants: arrayUnion(this.userId)
-  });
-    const userRef = doc(db, "rooms", this.roomId, "webrtc", this.userId);
+    const userRef = doc(db, `rooms/${this.roomId}/webrtc/${this.userId}`);
     await setDoc(userRef, {
       userId: this.userId,
       joined: true,
       timestamp: new Date(),
     });
 
-    // Listen for other users joining
-    const webrtcRef = collection(db, "rooms", this.roomId, "webrtc");
-    onSnapshot(webrtcRef, async (snapshot) => {
-      snapshot.docChanges().forEach(async (change) => {
+    const unsub = onSnapshot(collection(db, `rooms/${this.roomId}/webrtc`), async (snapshot) => {
+      for (const change of snapshot.docChanges()) {
         const peerId = change.doc.id;
-        
-        if (change.type === "added" && peerId !== this.userId) {
-          // Another user joined, create offer
-          await this.createOffer(peerId);
-        } else if (change.type === "removed" && peerId !== this.userId) {
-          // User left
-          this.closePeerConnection(peerId);
-          if (this.onPeerDisconnected) {
-            this.onPeerDisconnected(peerId);
-          }
+        if (peerId === this.userId) continue;
+
+        if (change.type === "added" || change.type === "modified") {
+          const data = change.doc.data();
+          await this.handleSignaling(peerId, data);
+        } else if (change.type === "removed") {
+          this.disconnectPeer(peerId);
         }
-      });
+      }
     });
 
-    // Listen for ICE candidates
-    this.listenForICECandidates();
-    
-    // Listen for offers and answers
-    this.listenForSignaling();
+    this.unsubscribers.push(unsub);
+
+    // Optionally create an offer to start connection attempts
+    // (You may choose to only create an offer when you detect a peer)
+    // await this.createOffer();
   }
 
-  /**
-   * Create a peer connection and send offer
-   */
-  private async createOffer(peerId: string) {
-    const peerConnection = this.createPeerConnection(peerId);
-    
-    // Add local stream to peer connection
-    if (this.localStream) {
-      this.localStream.getTracks().forEach((track) => {
-        peerConnection.addTrack(track, this.localStream!);
-      });
+  private async handleSignaling(peerId: string, data: any) {
+    if (!this.peers.has(peerId)) this.createPeerConnection(peerId);
+    const pc = this.peers.get(peerId)!;
+
+    if (data.offer && !pc.currentRemoteDescription) {
+      await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await this.sendAnswer(peerId, answer);
     }
 
-    // Create and send offer
-    const offer = await peerConnection.createOffer();
-    await peerConnection.setLocalDescription(offer);
+    if (data.answer && !pc.currentRemoteDescription) {
+      await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+    }
 
-    const offerDoc = doc(db, "rooms", this.roomId, "webrtc", this.userId, "offers", peerId);
-    await setDoc(offerDoc, {
-      offer: {
-        type: offer.type,
-        sdp: offer.sdp,
-      },
-      from: this.userId,
-      to: peerId,
-      timestamp: new Date(),
-    });
+    if (data.candidates && Array.isArray(data.candidates)) {
+      for (const c of data.candidates) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(c));
+        } catch (err) {
+          console.warn("Error adding candidate:", err);
+        }
+      }
+    }
   }
 
-  /**
-   * Create a peer connection
-   */
+  private async createOfferForPeer(peerId: string) {
+    const pc = this.createPeerConnection(peerId);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await this.sendOffer(peerId, offer);
+  }
+
   private createPeerConnection(peerId: string): RTCPeerConnection {
-    const peerConnection = new RTCPeerConnection(this.iceServers);
-    this.peerConnections.set(peerId, peerConnection);
+    const pc = new RTCPeerConnection(ICE_CONFIG);
 
-    // Handle ICE candidates
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        this.sendICECandidate(peerId, event.candidate);
-      }
-    };
-
-    // Handle incoming stream
-    peerConnection.ontrack = (event) => {
-      if (this.onRemoteStream && event.streams[0]) {
-        this.onRemoteStream(peerId, event.streams[0]);
-      }
-    };
-
-    // Handle connection state changes
-    peerConnection.onconnectionstatechange = () => {
-      if (peerConnection.connectionState === "disconnected" || 
-          peerConnection.connectionState === "failed" ||
-          peerConnection.connectionState === "closed") {
-        this.closePeerConnection(peerId);
-        if (this.onPeerDisconnected) {
-          this.onPeerDisconnected(peerId);
-        }
-      }
-    };
-
-    return peerConnection;
-  }
-
-  /**
-   * Send ICE candidate to peer
-   */
-  private async sendICECandidate(peerId: string, candidate: RTCIceCandidate) {
-    const candidateDoc = doc(
-      db,
-      "rooms",
-      this.roomId,
-      "webrtc",
-      this.userId,
-      "candidates",
-      peerId + "_" + Date.now()
-    );
-    await setDoc(candidateDoc, {
-      candidate: {
-        candidate: candidate.candidate,
-        sdpMLineIndex: candidate.sdpMLineIndex,
-        sdpMid: candidate.sdpMid,
-      },
-      from: this.userId,
-      to: peerId,
-    });
-  }
-
-  /**
-   * Listen for incoming ICE candidates
-   */
-  private listenForICECandidates() {
-    const candidatesRef = collection(db, "rooms", this.roomId, "webrtc");
-    
-    onSnapshot(candidatesRef, (snapshot) => {
-      snapshot.docs.forEach((userDoc) => {
-        const peerId = userDoc.id;
-        if (peerId === this.userId) return;
-
-        const candidatesSubRef = collection(userDoc.ref, "candidates");
-        onSnapshot(query(candidatesSubRef, where("to", "==", this.userId)), (candidateSnap) => {
-          candidateSnap.docChanges().forEach(async (change) => {
-            if (change.type === "added") {
-              const data = change.doc.data();
-              const peerConnection = this.peerConnections.get(peerId);
-              
-              if (peerConnection && data.candidate) {
-                await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-              }
-            }
-          });
-        });
-      });
-    });
-  }
-
-  /**
-   * Listen for offers and answers
-   */
-  private listenForSignaling() {
-    const webrtcRef = collection(db, "rooms", this.roomId, "webrtc");
-    
-    onSnapshot(webrtcRef, (snapshot) => {
-      snapshot.docs.forEach((userDoc) => {
-        const peerId = userDoc.id;
-        if (peerId === this.userId) return;
-
-        // Listen for offers
-        const offersRef = collection(userDoc.ref, "offers");
-        onSnapshot(query(offersRef, where("to", "==", this.userId)), async (offerSnap) => {
-          offerSnap.docChanges().forEach(async (change) => {
-            if (change.type === "added") {
-              const data = change.doc.data();
-              await this.handleOffer(peerId, data.offer);
-            }
-          });
-        });
-
-        // Listen for answers
-        const answersRef = collection(userDoc.ref, "answers");
-        onSnapshot(query(answersRef, where("to", "==", this.userId)), async (answerSnap) => {
-          answerSnap.docChanges().forEach(async (change) => {
-            if (change.type === "added") {
-              const data = change.doc.data();
-              await this.handleAnswer(peerId, data.answer);
-            }
-          });
-        });
-      });
-    });
-  }
-
-  /**
-   * Handle incoming offer
-   */
-  private async handleOffer(peerId: string, offer: RTCSessionDescriptionInit) {
-    let peerConnection = this.peerConnections.get(peerId);
-    
-    if (!peerConnection) {
-      peerConnection = this.createPeerConnection(peerId);
-      
-      // Add local stream
-      if (this.localStream) {
-        this.localStream.getTracks().forEach((track) => {
-          peerConnection!.addTrack(track, this.localStream!);
-        });
-      }
-    }
-
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-
-    // Send answer
-    const answerDoc = doc(db, "rooms", this.roomId, "webrtc", this.userId, "answers", peerId);
-    await setDoc(answerDoc, {
-      answer: {
-        type: answer.type,
-        sdp: answer.sdp,
-      },
-      from: this.userId,
-      to: peerId,
-      timestamp: new Date(),
-    });
-  }
-
-  /**
-   * Handle incoming answer
-   */
-  private async handleAnswer(peerId: string, answer: RTCSessionDescriptionInit) {
-    const peerConnection = this.peerConnections.get(peerId);
-    if (peerConnection) {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-    }
-  }
-
-  /**
-   * Close a peer connection
-   */
-  private closePeerConnection(peerId: string) {
-    const peerConnection = this.peerConnections.get(peerId);
-    if (peerConnection) {
-      peerConnection.close();
-      this.peerConnections.delete(peerId);
-    }
-  }
-
-  /**
-   * Leave the room and cleanup
-   */
-  async leaveRoom() {
-    // Stop local stream
     if (this.localStream) {
-      this.localStream.getTracks().forEach((track) => track.stop());
+      this.localStream.getTracks().forEach((t) => pc.addTrack(t, this.localStream!));
+    }
+
+    pc.ontrack = (ev) => {
+      const [remoteStream] = ev.streams;
+      if (remoteStream) this.onRemoteStream(peerId, remoteStream);
+    };
+
+    pc.onicecandidate = async (ev) => {
+      if (ev.candidate) {
+        await this.addCandidate(peerId, ev.candidate);
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (["disconnected", "failed", "closed"].includes(pc.connectionState)) {
+        this.disconnectPeer(peerId);
+      }
+    };
+
+    this.peers.set(peerId, pc);
+    return pc;
+  }
+
+ // ✅ CORRECT - Write to YOUR OWN document
+private async sendOffer(peerId: string, offer: RTCSessionDescriptionInit) {
+  // Store YOUR offer in YOUR document, addressed TO the peer
+  const ref = doc(db, `rooms/${this.roomId}/webrtc/${this.userId}`);
+  await setDoc(ref, { 
+    offer,
+    targetPeerId: peerId,  // Who this offer is for
+    userId: this.userId,
+    timestamp: new Date()
+  }, { merge: true });
+}
+
+private async sendAnswer(peerId: string, answer: RTCSessionDescriptionInit) {
+  // Store YOUR answer in YOUR document
+  const ref = doc(db, `rooms/${this.roomId}/webrtc/${this.userId}`);
+  await setDoc(ref, { 
+    answer,
+    targetPeerId: peerId,
+    userId: this.userId,
+    timestamp: new Date()
+  }, { merge: true });
+}
+
+private async addCandidate(peerId: string, candidate: RTCIceCandidate) {
+  // Add YOUR candidate to YOUR document
+  const ref = doc(db, `rooms/${this.roomId}/webrtc/${this.userId}`);
+  await setDoc(ref, { 
+    candidates: arrayUnion(candidate.toJSON()),
+    targetPeerId: peerId
+  }, { merge: true });
+}
+
+  private disconnectPeer(peerId: string) {
+    const pc = this.peers.get(peerId);
+    if (pc) {
+      pc.close();
+      this.peers.delete(peerId);
+      this.onPeerDisconnected(peerId);
+    }
+  }
+
+  async leaveRoom() {
+    this.unsubscribers.forEach((u) => u());
+    this.unsubscribers = [];
+
+    this.peers.forEach((pc) => pc.close());
+    this.peers.clear();
+
+    if (this.localStream) {
+      this.localStream.getTracks().forEach((t) => t.stop());
       this.localStream = null;
     }
 
-    // Close all peer connections
-    this.peerConnections.forEach((pc) => pc.close());
-    this.peerConnections.clear();
-
-    // Remove from Firestore
-    const userRef = doc(db, "rooms", this.roomId, "webrtc", this.userId);
-    await deleteDoc(userRef);
+    await deleteDoc(doc(db, `rooms/${this.roomId}/webrtc/${this.userId}`));
   }
 
-  /**
-   * Get local stream
-   */
-  getLocalStream(): MediaStream | null {
-    return this.localStream;
+  toggleAudio(enabled: boolean) {
+    this.localStream?.getAudioTracks().forEach((t) => (t.enabled = enabled));
+  }
+
+  toggleVideo(enabled: boolean) {
+    this.localStream?.getVideoTracks().forEach((t) => (t.enabled = enabled));
   }
 }
+
+// Export a convenient instance type so hooks/components can use it as a type.
+export type WebRTCServiceInstance = InstanceType<typeof WebRTCService>;

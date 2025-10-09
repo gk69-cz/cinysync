@@ -1,16 +1,14 @@
 // client/src/pages/room.tsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { VideoTile } from "@/components/VideoTile";
 import { ChatContainer } from "@/components/ChatContainer";
 import { VideoPlayer } from "@/components/VideoPlayer";
 import { Film, Mic, MicOff, Video, VideoOff, Share2, Settings as SettingsIcon, LogOut, Copy, Phone, PhoneOff } from "lucide-react";
 import { Link, useParams, useLocation } from "wouter";
-import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
-import { useWebRTC as WebRTCService } from "@/hooks/useWebRTC";
-
+import { useWebRTC } from "@/hooks/useWebRTC";
 import { getRoomById, joinRoom, leaveRoom } from "../services/roomService";
 import { Room } from "@/types/room";
 import { useToast } from "@/hooks/use-toast";
@@ -25,75 +23,35 @@ export default function RoomPage() {
   const [loading, setLoading] = useState(true);
 
 
-// inside your component
-const [webrtc, setWebRTC] = useState<WebRTCService | null>(null);
-const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-const [remotePeers, setRemotePeers] = useState<any[]>([]);
-const [isConnected, setIsConnected] = useState(false);
-const [isInitializing, setIsInitializing] = useState(false);
-const [isAudioEnabled, setIsAudioEnabled] = useState(true);
-const [isVideoEnabled, setIsVideoEnabled] = useState(true);
+  // WebRTC Hook
+  const {
+    connect,
+    disconnect,
+    localStream,
+    remotePeers,
+    isConnected,
+    isInitializing,
+    toggleAudio,
+    toggleVideo,
+    isAudioEnabled,
+    isVideoEnabled,
+  } = useWebRTC(id!, currentUser?.uid || "");
 
-// Initialize WebRTC when user joins
-const connect = async () => {
-  if (webrtc) return; // prevent duplicates
-  setIsInitializing(true);
-  try {
-    const service = new WebRTCService(
-      id!,
-      currentUser?.uid || "",
-      (peerId: string, stream: MediaStream) => {
-        setRemotePeers((prev) => [...prev, { peerId, stream }]);
-      },
-      (peerId: string) => {
-        setRemotePeers((prev) => prev.filter((p) => p.peerId !== peerId));
-      }
-    );
+  const localVideoRef = useRef<HTMLVideoElement>(null);
 
-    const stream = await service.initializeLocalStream(isAudioEnabled, isVideoEnabled);
-    setLocalStream(stream);
+  // Attach local stream to video element
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream]);
 
-    await service.joinRoom();
-    setWebRTC(service);
-    setIsConnected(true);
-  } catch (err) {
-    console.error("Error connecting WebRTC:", err);
-  } finally {
-    setIsInitializing(false);
-  }
-};
-
-// Leave call and cleanup
-const disconnect = async () => {
-  if (!webrtc) return;
-  await webrtc.leaveRoom();
-  setWebRTC(null);
-  setLocalStream(null);
-  setRemotePeers([]);
-  setIsConnected(false);
-};
-
-// Toggle audio/video
-const toggleAudio = () => {
-  if (!webrtc) return;
-  const newState = !isAudioEnabled;
-  webrtc.toggleAudio(newState);
-  setIsAudioEnabled(newState);
-};
-
-const toggleVideo = () => {
-  if (!webrtc) return;
-  const newState = !isVideoEnabled;
-  webrtc.toggleVideo(newState);
-  setIsVideoEnabled(newState);
-};
-
-
+  // Load room info
   useEffect(() => {
     loadRoom();
   }, [id, currentUser]);
 
-  const loadRoom = async () => {
+   const loadRoom = async () => {
     if (!id || !currentUser) return;
 
     try {
@@ -120,7 +78,6 @@ const toggleVideo = () => {
         return;
       }
 
-      // Join the room if not already a participant
       if (!roomData.participants.includes(currentUser.uid)) {
         await joinRoom(id, currentUser.uid);
         roomData.participants.push(currentUser.uid);
@@ -144,11 +101,9 @@ const toggleVideo = () => {
     if (!id || !currentUser) return;
 
     try {
-      // Disconnect WebRTC first
       if (isConnected) {
         await disconnect();
       }
-      
       await leaveRoom(id, currentUser.uid);
       toast({
         title: "Left room",
@@ -182,6 +137,14 @@ const toggleVideo = () => {
     }
   };
 
+  const handleConnectCall = async () => {
+    if (isConnected) {
+      await disconnect();
+    } else {
+      await connect();
+    }
+  };
+
   if (loading) {
     return (
       <div className="h-screen bg-background flex items-center justify-center">
@@ -193,12 +156,11 @@ const toggleVideo = () => {
     );
   }
 
-  if (!room) {
-    return null;
-  }
+  if (!room) return null;
 
   return (
     <div className="h-screen bg-background flex flex-col">
+      {/* Header */}
       <header className="flex items-center justify-between p-4 border-b border-border">
         <div className="flex items-center gap-3">
           <Link href="/dashboard">
@@ -207,14 +169,14 @@ const toggleVideo = () => {
             </div>
           </Link>
           <div>
-            <h1 className="font-display font-semibold text-lg" data-testid="text-room-name">
+            <h1 className="font-display font-semibold text-lg">
               {room.roomName}
             </h1>
             <div className="flex items-center gap-2">
               <Badge variant="secondary" className="text-xs capitalize">
                 {room.service}
               </Badge>
-              <span className="text-xs text-muted-foreground" data-testid="text-participant-count">
+              <span className="text-xs text-muted-foreground">
                 {room.participants.length} participants
               </span>
             </div>
@@ -222,35 +184,26 @@ const toggleVideo = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={handleCopyRoomCode}
-            data-testid="button-copy-code"
-          >
+          <Button variant="ghost" size="icon" onClick={handleCopyRoomCode}>
             <Copy className="h-5 w-5" />
           </Button>
-          <Button variant="ghost" size="icon" data-testid="button-settings">
+          <Button variant="ghost" size="icon">
             <SettingsIcon className="h-5 w-5" />
           </Button>
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={handleLeaveRoom}
-            data-testid="button-leave"
-          >
+          <Button variant="ghost" size="icon" onClick={handleLeaveRoom}>
             <LogOut className="h-5 w-5" />
           </Button>
         </div>
       </header>
 
+      {/* Body */}
       <div className="flex-1 flex overflow-hidden">
+        {/* Video Area */}
         <div className="flex-1 flex flex-col">
-          {/* Video Player Area */}
           <div className="flex-1 bg-muted/30 flex items-center justify-center p-6">
             <div className="aspect-video w-full max-w-4xl">
-               <VideoPlayer 
-                url={room.url} 
+              <VideoPlayer
+                url={room.url}
                 service={room.service}
                 roomId={id!}
                 userId={currentUser!.uid}
@@ -258,17 +211,16 @@ const toggleVideo = () => {
             </div>
           </div>
 
-          {/* Video Controls */}
+          {/* Controls */}
+          {/* Controls */}
           <div className="p-4 border-t border-border bg-card/50 backdrop-blur-sm">
             <div className="flex items-center justify-center gap-3">
-              {/* Join/Leave Call Button */}
               {!isConnected ? (
                 <Button
                   variant="default"
                   size="icon"
-                  onClick={connect}
+                  onClick={handleConnectCall}
                   disabled={isInitializing}
-                  data-testid="button-join-call"
                   className="bg-green-600 hover:bg-green-700"
                 >
                   {isInitializing ? (
@@ -278,72 +230,53 @@ const toggleVideo = () => {
                   )}
                 </Button>
               ) : (
-                <Button
-                  variant="destructive"
-                  size="icon"
-                  onClick={disconnect}
-                  data-testid="button-leave-call"
-                >
+                <Button variant="destructive" size="icon" onClick={handleConnectCall}>
                   <PhoneOff className="h-5 w-5" />
                 </Button>
               )}
 
-              {/* Mic Toggle */}
               <Button
                 variant={!isAudioEnabled ? "destructive" : "secondary"}
                 size="icon"
                 onClick={toggleAudio}
                 disabled={!isConnected}
-                data-testid="button-toggle-mic"
               >
                 {!isAudioEnabled ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
               </Button>
 
-              {/* Video Toggle */}
               <Button
                 variant={!isVideoEnabled ? "destructive" : "secondary"}
                 size="icon"
                 onClick={toggleVideo}
                 disabled={!isConnected}
-                data-testid="button-toggle-video"
               >
                 {!isVideoEnabled ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
               </Button>
 
-              {/* Screen Share (Future feature) */}
-              <Button 
-                variant="secondary" 
-                size="icon" 
-                disabled={!isConnected}
-                data-testid="button-share-screen"
-              >
+              <Button variant="secondary" size="icon" disabled={!isConnected}>
                 <Share2 className="h-5 w-5" />
               </Button>
             </div>
-          </div>
         </div>
 
         {/* Sidebar */}
         <div className="w-80 border-l border-border flex flex-col">
-          {/* Participants Section */}
           <div className="p-4 border-b border-border">
             <h2 className="font-semibold mb-3">
               Participants ({room.participants.length})
               {isConnected && <span className="text-green-500 ml-2">● Live</span>}
             </h2>
             <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
-              {/* Local user video */}
               {isConnected && (
-                <VideoTile 
-                  name={currentUser?.displayName || "You"} 
+                <VideoTile
+                  name={currentUser?.displayName || "You"}
                   avatar={currentUser?.photoURL || undefined}
-                  isMuted={!isAudioEnabled} 
+                  isMuted={!isAudioEnabled}
                   stream={localStream || undefined}
                   isLocal={true}
                 />
               )}
-              
-              {/* Remote participants */}
+
               {remotePeers.map((peer) => (
                 <VideoTile
                   key={peer.peerId}
@@ -353,8 +286,7 @@ const toggleVideo = () => {
                   isLocal={false}
                 />
               ))}
-              
-              {/* Placeholder when not connected */}
+
               {!isConnected && (
                 <div className="col-span-2 text-center p-4 bg-muted rounded-lg">
                   <Phone className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
@@ -366,7 +298,6 @@ const toggleVideo = () => {
             </div>
           </div>
 
-          {/* Chat Section */}
           <ChatContainer
             roomId={id!}
             currentUserId={currentUser!.uid}
@@ -375,6 +306,7 @@ const toggleVideo = () => {
           />
         </div>
       </div>
+    </div>
     </div>
   );
 }
