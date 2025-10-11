@@ -119,12 +119,12 @@ export class VideoUploadService {
           try {
             const response = JSON.parse(xhr.responseText);
             // console.log('✅ Upload complete:', response.secure_url);
-             console.log('📊 Response details:', {
-              publicId: response.public_id,
-              format: response.format,
-              duration: response.duration,
-              bytes: response.bytes
-            });
+            //  console.log('📊 Response details:', {
+            //   publicId: response.public_id,
+            //   format: response.format,
+            //   duration: response.duration,
+            //   bytes: response.bytes
+            // });
             resolve(response.secure_url);
           } catch (error) {
             console.error('❌ Failed to parse response:', xhr.responseText);
